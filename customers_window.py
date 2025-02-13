@@ -9,6 +9,10 @@ from PyQt5.QtWidgets import (
     QCheckBox, QTableWidget, QHeaderView, QTableWidgetItem
 )
 
+from db_utils import get_representative_info
+from db_utils import get_current_campaign_settings
+from datetime import datetime
+
 DB_PATH = "avon_hello.db"
 
 class CustomersWindow(QMainWindow):
@@ -162,7 +166,6 @@ class CustomersWindow(QMainWindow):
             self.edit_customer_dialog.exec_()
             self.load_customers()  # Refresh after edit
 
-
 class EditCustomerDialog(QDialog):
     """Dialog to Edit a Customer and View Orders."""
     
@@ -176,7 +179,10 @@ class EditCustomerDialog(QDialog):
         # Fetch customer data
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        cursor.execute("SELECT first_name, last_name, address, city, state, zip_code, phone, email, status FROM customers WHERE customer_id = ?", (customer_id,))
+        cursor.execute(
+            "SELECT first_name, last_name, address, city, state, zip_code, phone, email, status FROM customers WHERE customer_id = ?",
+            (customer_id,)
+        )
         customer = cursor.fetchone()
 
         cursor.execute("""
@@ -191,7 +197,6 @@ class EditCustomerDialog(QDialog):
                 net_due REAL DEFAULT 0
             )
         """)
-
         cursor.execute("""
             SELECT campaign_year, campaign_number, order_total, previous_balance, payment, net_due
             FROM orders WHERE customer_id = ? ORDER BY campaign_year DESC, campaign_number DESC LIMIT 1
@@ -239,23 +244,28 @@ class EditCustomerDialog(QDialog):
         layout.addWidget(self.status_input)
 
         # Order Summary Section
-        order_group = QGroupBox("Order Summary (Latest Campaign)")
+        order_group = QGroupBox("Order Summary (Current Campaign)")
         order_layout = QVBoxLayout()
 
+        # Use current campaign settings from options_window
+        current_year, current_campaign = get_current_campaign_settings()       
+        self.order_year = QLabel(f"Campaign Year: {current_year}")
+        self.order_campaign = QLabel(f"Campaign Number: {current_campaign}")
+
+        # Populate order summary based on order_data if it exists
         if order_data:
-            self.order_year = QLabel(f"Campaign Year: {order_data[0]}")
-            self.order_campaign = QLabel(f"Campaign Number: {order_data[1]}")
             self.order_total = QLabel(f"Order Total: ${order_data[2]:.2f}")
             self.previous_balance = QLabel(f"Previous Balance: ${order_data[3]:.2f}")
             self.payment = QLabel(f"Payment: ${order_data[4]:.2f}")
             self.net_due = QLabel(f"Net Due: ${order_data[5]:.2f}")
         else:
-            self.order_year = QLabel("Campaign Year: N/A")
-            self.order_campaign = QLabel("Campaign Number: N/A")
             self.order_total = QLabel("Order Total: $0.00")
             self.previous_balance = QLabel("Previous Balance: $0.00")
             self.payment = QLabel("Payment: $0.00")
             self.net_due = QLabel("Net Due: $0.00")
+
+        self.time_submitted_label = QLabel("Time Submitted: N/A")
+        self.last_edited_label = QLabel("Last Edited: N/A")
 
         order_layout.addWidget(self.order_year)
         order_layout.addWidget(self.order_campaign)
@@ -263,27 +273,87 @@ class EditCustomerDialog(QDialog):
         order_layout.addWidget(self.previous_balance)
         order_layout.addWidget(self.payment)
         order_layout.addWidget(self.net_due)
-
+        order_layout.addWidget(self.time_submitted_label)
+        order_layout.addWidget(self.last_edited_label)         
         order_group.setLayout(order_layout)
         layout.addWidget(order_group)
 
         # Order Entry Button
-        self.btn_order_entry = QPushButton("Order Entry")
+        self.btn_order_entry = QPushButton("New Order Entry")
         self.btn_order_entry.clicked.connect(self.open_order_entry)
         layout.addWidget(self.btn_order_entry)
+
+        # --- Order History Section ---
+        self.order_history = QComboBox()
+        self.order_history.currentIndexChanged.connect(self.display_order_details)
+        layout.addWidget(QLabel("Order History:"))
+        layout.addWidget(self.order_history)
+        self.load_order_history()
+
+        # Refresh Order Summary Button
+        btn_refresh_summary = QPushButton("Refresh Order Summary")
+        btn_refresh_summary.clicked.connect(self.refresh_order_summary)
+        layout.addWidget(btn_refresh_summary)
+
+        # View Order Details Button
+        self.btn_view_order = QPushButton("View Order Details")
+        self.btn_view_order.clicked.connect(self.view_order_details)
+        layout.addWidget(self.btn_view_order)
 
         # Save & Delete Buttons
         btn_save = QPushButton("Save Changes")
         btn_save.clicked.connect(self.save_customer)
-
         layout.addWidget(btn_save)
+
         self.setLayout(layout)
 
     def open_order_entry(self):
-        """Open Order Entry Window."""
-        self.order_entry_dialog = OrderEntryDialog(self.customer_id, self)
+        """Open Order Entry Window using current campaign settings."""
+        current_year, current_campaign = get_current_campaign_settings()
+        self.order_entry_dialog = OrderEntryDialog(self.customer_id, current_year, current_campaign, self)
         self.order_entry_dialog.exec_()
+        # Automatically refresh the summary after closing the order entry dialog
+        self.refresh_order_summary()
 
+    def refresh_order_summary(self):
+        """Refresh the order summary information and Order History list for the current customer."""
+        print("Refreshing order summary for customer:", self.customer_id)  # Debug print
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        # Note: We now select two extra columns: time_submitted and last_edited.
+        cursor.execute("""
+            SELECT campaign_year, campaign_number, order_total, previous_balance, payment, net_due, time_submitted, last_edited
+            FROM orders 
+            WHERE customer_id = ? 
+            ORDER BY time_submitted DESC LIMIT 1
+        """, (self.customer_id,))
+        order_data = cursor.fetchone()
+        conn.close()
+        print("Fetched order_data:", order_data)  # Debug print
+
+        current_year, current_campaign = get_current_campaign_settings()
+        self.order_year.setText(f"Campaign Year: {current_year}")
+        self.order_campaign.setText(f"Campaign Number: {current_campaign}")
+
+        if order_data:
+            self.order_total.setText(f"Order Total: ${order_data[2]:.2f}")
+            self.previous_balance.setText(f"Previous Balance: ${order_data[3]:.2f}")
+            self.payment.setText(f"Payment: ${order_data[4]:.2f}")
+            self.net_due.setText(f"Net Due: ${order_data[5]:.2f}")
+            self.time_submitted_label.setText(f"Time Submitted: {order_data[6]}")
+            self.last_edited_label.setText(f"Last Edited: {order_data[7]}")
+        else:
+            self.order_total.setText("Order Total: $0.00")
+            self.previous_balance.setText("Previous Balance: $0.00")
+            self.payment.setText("Payment: $0.00")
+            self.net_due.setText("Net Due: $0.00")
+            self.time_submitted_label.setText("Time Submitted: N/A")
+            self.last_edited_label.setText("Last Edited: N/A")
+
+        # Refresh the Order History list as well.
+        self.load_order_history()
+
+       
     def save_customer(self):
         """Save updated customer details to database."""
         conn = sqlite3.connect(DB_PATH)
@@ -304,25 +374,63 @@ class EditCustomerDialog(QDialog):
         self.accept()
 
     def load_order_history(self):
-        """Load past orders for the customer."""
+        """Load past orders for the customer into the order history combo box."""
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
+        # Updated: Order by time_submitted instead of order_date
         cursor.execute("""
-            SELECT campaign_year, campaign_number, order_total, previous_balance, payment, net_due
-            FROM orders WHERE customer_id = ?
-            ORDER BY campaign_year DESC, campaign_number DESC
+            SELECT order_id, campaign_year, campaign_number, order_total, net_due
+            FROM orders 
+            WHERE customer_id = ?
+            ORDER BY time_submitted DESC
         """, (self.customer_id,))
         orders = cursor.fetchall()
         conn.close()
 
-        if orders:
-            self.order_history.clear()
-            for order in orders:
-                self.order_history.addItem(
-                    f"Campaign {order[1]} ({order[0]}): Total ${order[2]:.2f}, Due ${order[5]:.2f}"
-                )
+        self.order_history.clear()
+        for order in orders:
+            order_id, year, campaign, total, net_due = order
+            display_text = f"Campaign {campaign} ({year}): Total ${total:.2f}, Due ${net_due:.2f}"
+            self.order_history.addItem(display_text, order_id)
 
+    def display_order_details(self, index):
+        if index < 0:
+            return
+        order_id = self.order_history.itemData(index)
+        if order_id is None:
+            return
 
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT campaign_year, campaign_number, order_total, previous_balance, payment, net_due
+            FROM orders
+            WHERE order_id = ?
+        """, (order_id,))
+        order = cursor.fetchone()
+        conn.close()
+        if order:
+            self.order_year.setText(f"Campaign Year: {order[0]}")
+            self.order_campaign.setText(f"Campaign Number: {order[1]}")
+            self.order_total.setText(f"Order Total: ${order[2]:.2f}")
+            self.previous_balance.setText(f"Previous Balance: ${order[3]:.2f}")
+            self.payment.setText(f"Payment: ${order[4]:.2f}")
+            self.net_due.setText(f"Net Due: ${order[5]:.2f}")
+
+    def view_order_details(self):
+        index = self.order_history.currentIndex()
+        if index < 0:
+            return
+        order_id = self.order_history.itemData(index)
+        if order_id is None:
+            return
+        # Open OrderEntryDialog with the selected order's details.
+        # We pass the order_id so that the dialog knows to load existing data.
+        # (The campaign_year and campaign_number parameters will be overridden by the loaded order details.)
+        dialog = OrderEntryDialog(self.customer_id, 0, 0, self, order_id=order_id)
+        dialog.exec_()
+    
+           
 class AddCustomerDialog(QDialog):
     """Dialog to Add a New Customer."""
     
@@ -356,47 +464,63 @@ class AddCustomerDialog(QDialog):
 class OrderEntryDialog(QDialog):
     """Dialog to Enter Order Details for a Customer."""
     
-    def __init__(self, customer_id, campaign_year, campaign_number, parent=None):
+    def __init__(self, customer_id, campaign_year, campaign_number, parent=None, order_id=None):
         super().__init__(parent)
         self.setWindowTitle("Order Entry")
         self.setGeometry(300, 200, 1000, 500)
         self.customer_id = customer_id
-        self.campaign_year = campaign_year  # Store campaign year
-        self.campaign_number = campaign_number  # Store campaign number
+        # If order_id is provided, we will load that order’s details.
+        self.order_id = order_id
+        # Otherwise, use the provided campaign settings for a new order.
+        self.campaign_year = campaign_year
+        self.campaign_number = campaign_number
+
+        # Define order_date as the current date/time (or later overwritten if loading an existing order)
+        self.order_date = datetime.now().strftime("%A, %B %d, %Y %I:%M %p")
+        
+        # Representative info can be set here or loaded from your database.
+        self.rep_name = "Representative Name"
+        self.rep_address = "Representative Address"
+        self.rep_phone = "Representative Phone"
+        self.rep_email = "Representative Email"
+        self.rep_website = "Representative Website"
 
         layout = QVBoxLayout()
 
-        # Order Table
-        self.order_table = QTableWidget(0, 10)  # Start with 0 rows, 10 columns
+        # Set up Order Table
+        self.order_table = QTableWidget(0, 11)
         self.order_table.setHorizontalHeaderLabels([
             "Product Number", "Page", "Description", "Shade/Fragrance", "Size", "QTY",
             "Unit Price", "Reg Price", "Tax", "Discount %", "Total Price"
         ])
         self.order_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-
         layout.addWidget(self.order_table)
 
-        # Buttons for Actions
+        # Connect the itemChanged signal once.
+        self.order_table.itemChanged.connect(self.update_total)
+
+        # Buttons for actions
         btn_layout = QHBoxLayout()
         self.btn_add_row = QPushButton("Add Product")
         self.btn_save_order = QPushButton("Save Order")
         self.btn_print_order = QPushButton("Print Order")
-
         self.btn_add_row.clicked.connect(self.add_order_row)
         self.btn_save_order.clicked.connect(self.save_order)
         self.btn_print_order.clicked.connect(self.print_order)
-
         btn_layout.addWidget(self.btn_add_row)
         btn_layout.addWidget(self.btn_save_order)
         btn_layout.addWidget(self.btn_print_order)
-
         layout.addLayout(btn_layout)
 
-        # Total Order Summary
+        # Total Order Summary Label
         self.total_label = QLabel("Total: $0.00")
         layout.addWidget(self.total_label)
 
         self.setLayout(layout)
+
+        # If an order_id was provided, load its details.
+        if self.order_id is not None:
+            self.load_order_details(self.order_id)
 
     def add_order_row(self):
         """Add a new row to the order table."""
@@ -426,8 +550,17 @@ class OrderEntryDialog(QDialog):
         # Connect events
         self.order_table.itemChanged.connect(self.update_total)
 
-    def update_total(self):
-        """Calculate total order price dynamically, ensuring all fields exist."""
+    def update_total(self, changed_item):
+        """Calculate total order price dynamically and auto-format price fields."""
+        # Only auto-format if changed_item is provided.
+        if changed_item is not None and changed_item.column() in (6, 7):
+            text = changed_item.text()
+            if text and not text.startswith("$"):
+                self.order_table.blockSignals(True)
+                cleaned_text = text.replace("$", "")
+                changed_item.setText(f"${cleaned_text}")
+                self.order_table.blockSignals(False)
+        
         total = 0.0
         for row in range(self.order_table.rowCount()):
             try:
@@ -435,20 +568,20 @@ class OrderEntryDialog(QDialog):
                 qty = float(qty_item.text()) if qty_item and qty_item.text().strip() else 0
 
                 unit_price_item = self.order_table.item(row, 6)
-                unit_price = float(unit_price_item.text().replace("$", "")) if unit_price_item and unit_price_item.text().strip() else 0.0
+                unit_price_text = unit_price_item.text() if unit_price_item and unit_price_item.text().strip() else "$0.00"
+                unit_price = float(unit_price_text.replace("$", ""))
 
                 discount_item = self.order_table.item(row, 9)
                 discount = float(discount_item.text()) if discount_item and discount_item.text().strip() else 0
 
-                # Calculate discounted price
+                # Calculate final price with discount
                 final_price = (unit_price * qty) * ((100 - discount) / 100)
 
-                # Check if tax is applied
+                # Check for tax (column 8 widget)
                 tax_checkbox = self.order_table.cellWidget(row, 8)
                 if tax_checkbox and tax_checkbox.isChecked():
-                    final_price *= 1.1  # Assume 10% tax for now
+                    final_price *= 1.1  # 10% tax
 
-                # Ensure the "Total Price" column exists before setting the value
                 total_price_item = self.order_table.item(row, 10)
                 if not total_price_item:
                     self.order_table.setItem(row, 10, QTableWidgetItem(f"${final_price:.2f}"))
@@ -457,104 +590,172 @@ class OrderEntryDialog(QDialog):
 
                 total += final_price
             except ValueError:
-                continue  # Ignore invalid inputs
-
+                continue
         self.total_label.setText(f"Total: ${total:.2f}")
+
+    def open_order_entry(self):
+        """Open Order Entry Window using current campaign settings."""
+        current_year, current_campaign = get_current_campaign_settings()
+        self.order_entry_dialog = OrderEntryDialog(self.customer_id, current_year, current_campaign, self)
+        self.order_entry_dialog.exec_()
+        # Refresh the order summary after closing the Order Entry dialog
+        self.refresh_order_summary()
+
+    def load_order_details(self, order_id):
+        """Load the order details and products from the database into the dialog."""
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        # Updated query: use time_submitted instead of order_date
+        cursor.execute("""
+            SELECT campaign_year, campaign_number, order_total, previous_balance, payment, net_due, time_submitted
+            FROM orders
+            WHERE order_id = ?
+        """, (order_id,))
+        order_data = cursor.fetchone()
+        if order_data:
+            self.campaign_year = order_data[0]
+            self.campaign_number = order_data[1]
+            # Update internal variable for display, if desired
+            self.order_date = order_data[6]  # now using time_submitted
+            self.total_label.setText(f"Total: ${order_data[2]:.2f}")
+        # Load the associated products (unchanged)
+        cursor.execute("""
+            SELECT product_number, page, description, shade, size, qty, unit_price, reg_price, tax, discount, total_price
+            FROM order_products
+            WHERE order_id = ?
+        """, (order_id,))
+        products = cursor.fetchall()
+        conn.close()
+        for product in products:
+            row_position = self.order_table.rowCount()
+            self.order_table.insertRow(row_position)
+            self.order_table.setItem(row_position, 0, QTableWidgetItem(product[0]))
+            self.order_table.setItem(row_position, 1, QTableWidgetItem(product[1]))
+            self.order_table.setItem(row_position, 2, QTableWidgetItem(product[2]))
+            self.order_table.setItem(row_position, 3, QTableWidgetItem(product[3]))
+            self.order_table.setItem(row_position, 4, QTableWidgetItem(product[4]))
+            self.order_table.setItem(row_position, 5, QTableWidgetItem(str(product[5])))
+            self.order_table.setItem(row_position, 6, QTableWidgetItem(f"${product[6]:.2f}"))
+            self.order_table.setItem(row_position, 7, QTableWidgetItem(f"${product[7]:.2f}"))
+            tax_checkbox = QCheckBox()
+            tax_checkbox.setChecked(bool(product[8]))
+            self.order_table.setCellWidget(row_position, 8, tax_checkbox)
+            self.order_table.setItem(row_position, 9, QTableWidgetItem(str(product[9])))
+            self.order_table.setItem(row_position, 10, QTableWidgetItem(f"${product[10]:.2f}"))
+        self.update_total(None)
 
     def save_order(self):
         """Save order to the database and update order history."""
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
+        print("Save Order button clicked.")
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
 
-        # Ensure orders table exists
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS orders (
-                order_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                customer_id INTEGER,
-                campaign_year INTEGER,
-                campaign_number INTEGER,
-                order_total REAL DEFAULT 0,
-                previous_balance REAL DEFAULT 0,
-                payment REAL DEFAULT 0,
-                net_due REAL DEFAULT 0,
-                order_date TEXT DEFAULT (datetime('now', 'localtime')) -- Ensure it has a default value
-            )
-        """)
+            # Ensure orders table exists
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS orders (
+                    order_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    customer_id INTEGER,
+                    campaign_year INTEGER,
+                    campaign_number INTEGER,
+                    order_total REAL DEFAULT 0,
+                    previous_balance REAL DEFAULT 0,
+                    payment REAL DEFAULT 0,
+                    net_due REAL DEFAULT 0,
+                    time_submitted TEXT DEFAULT (datetime('now', 'localtime')),
+                    last_edited TEXT DEFAULT (datetime('now', 'localtime'))
+                )
+            """)
 
-        # Ensure order_products table exists
-        cursor.execute("""
-            INSERT INTO orders (customer_id, campaign_year, campaign_number, order_total, previous_balance, payment, net_due, order_date)
-            VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
-        """, (
-            self.customer_id, 2025, 25, 0, 0, 0, 0
-        ))
-
-        # Insert new order
-        cursor.execute("""
-            INSERT INTO orders (customer_id, campaign_year, campaign_number, order_total, previous_balance, payment, net_due)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (
-            self.customer_id, 2025, 25, 0, 0, 0, 0
-        ))
-        order_id = cursor.lastrowid  # Get the inserted order ID
-
-        # Insert each product into order_products table
-        for row in range(self.order_table.rowCount()):
-            try:
-                product_number = self.order_table.item(row, 0).text()
-                page = self.order_table.item(row, 1).text()
-                description = self.order_table.item(row, 2).text()
-                shade = self.order_table.item(row, 3).text()
-                size = self.order_table.item(row, 4).text()
-                qty = int(self.order_table.item(row, 5).text())
-                unit_price = float(self.order_table.item(row, 6).text().replace("$", ""))
-                reg_price = float(self.order_table.item(row, 7).text().replace("$", ""))
-
-                tax_checkbox = self.order_table.cellWidget(row, 8)
-                tax = 1 if tax_checkbox and tax_checkbox.isChecked() else 0
-
-                discount = float(self.order_table.item(row, 9).text())
+            # Calculate order_total by summing each product’s total
+            order_total = 0.0
+            for row in range(self.order_table.rowCount()):
                 total_price_item = self.order_table.item(row, 10)
-                total_price = float(total_price_item.text().replace("$", "")) if total_price_item else 0.00
+                if total_price_item and total_price_item.text().strip():
+                    try:
+                        row_total = float(total_price_item.text().replace("$", ""))
+                        order_total += row_total
+                    except ValueError:
+                        print(f"Invalid total at row {row}: {total_price_item.text()}")
+                        continue
 
-                # Insert product into database
-                cursor.execute("""
-                    INSERT INTO order_products 
-                    (order_id, product_number, page, description, shade, size, qty, unit_price, reg_price, tax, discount, total_price)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (order_id, product_number, page, description, shade, size, qty, unit_price, reg_price, tax, discount, total_price))
+            print(f"Calculated order total: {order_total}")
 
-            except ValueError:
-                continue  # Ignore invalid rows
+            # Insert new order using the current campaign settings from the dialog
+            cursor.execute("""
+                INSERT INTO orders (customer_id, campaign_year, campaign_number, order_total, previous_balance, payment, net_due)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                self.customer_id,
+                self.campaign_year,
+                self.campaign_number,
+                order_total,
+                0,           # previous_balance; update if needed
+                0,           # payment; update if needed
+                order_total  # net_due; for now assume net_due equals order_total
+            ))
+            order_id = cursor.lastrowid  # Get the inserted order ID
+            print(f"Order inserted with order_id: {order_id}")
 
-        conn.commit()
-        conn.close()
-        QMessageBox.information(self, "Saved", "Order saved successfully!")
-        self.accept()  # Close the order entry dialog
+            # Ensure order_products table exists
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS order_products (
+                    product_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    order_id INTEGER,
+                    product_number TEXT,
+                    page TEXT,
+                    description TEXT,
+                    shade TEXT,
+                    size TEXT,
+                    qty INTEGER,
+                    unit_price REAL,
+                    reg_price REAL,
+                    tax INTEGER,
+                    discount REAL,
+                    total_price REAL
+                )
+            """)
 
-    def open_order_entry(self):
-        """Open Order Entry Window and fetch latest campaign details."""
+            # Insert each product into order_products table
+            for row in range(self.order_table.rowCount()):
+                try:
+                    product_number = self.order_table.item(row, 0).text()
+                    page = self.order_table.item(row, 1).text()
+                    description = self.order_table.item(row, 2).text()
+                    shade = self.order_table.item(row, 3).text()
+                    size = self.order_table.item(row, 4).text()
+                    qty = int(self.order_table.item(row, 5).text())
+                    unit_price = float(self.order_table.item(row, 6).text().replace("$", ""))
+                    reg_price = float(self.order_table.item(row, 7).text().replace("$", ""))
+                    tax_checkbox = self.order_table.cellWidget(row, 8)
+                    tax = 1 if tax_checkbox and tax_checkbox.isChecked() else 0
+                    discount = float(self.order_table.item(row, 9).text())
+                    total_price = float(self.order_table.item(row, 10).text().replace("$", ""))
+                    
+                    cursor.execute("""
+                        INSERT INTO order_products 
+                        (order_id, product_number, page, description, shade, size, qty, unit_price, reg_price, tax, discount, total_price)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (order_id, product_number, page, description, shade, size, qty, unit_price, reg_price, tax, discount, total_price))
+                    print(f"Inserted product for row {row}")
+                except Exception as e:
+                    print(f"Error inserting product for row {row}: {e}")
+                    continue  # Skip rows with invalid data
 
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT campaign_year, campaign_number 
-            FROM orders WHERE customer_id = ? 
-            ORDER BY campaign_year DESC, campaign_number DESC LIMIT 1
-        """, (self.customer_id,))
-        latest_order = cursor.fetchone()
-        conn.close()
+            conn.commit()
+            conn.close()
 
-        if latest_order:
-            campaign_year, campaign_number = latest_order
-        else:
-            campaign_year, campaign_number = 2025, 1  # Default values if no order exists
+            QMessageBox.information(self, "Saved", "Order saved successfully!")
+            self.accept()  # Close the order entry dialog
 
-        self.order_entry_dialog = OrderEntryDialog(self.customer_id, campaign_year, campaign_number, self)
-        self.order_entry_dialog.exec_()
+        except Exception as e:
+            print("Error in save_order:", e)
+            QMessageBox.critical(self, "Error", f"An error occurred while saving the order: {e}")
 
     def print_order(self):
         """Generate a formatted order printout."""
+        rep_info = get_representative_info()
+        
         print_file = "order_summary.txt"
         with open(print_file, "w") as f:
             f.write(" " * 20 + "AVON BY MONICA\n")
@@ -563,22 +764,19 @@ class OrderEntryDialog(QDialog):
             f.write(f"Campaign # {self.campaign_number} \n")
             f.write(f"{self.order_date}\n\n")
 
-            # Customer details
-            f.write(f"Campaign # {self.campaign_number} - {self.campaign_year}\n")  # Now campaign details exist
+            # Use representative details from the database
+            f.write(f"Campaign # {self.campaign_number} - {self.campaign_year}\n")
             f.write("Tuesday, January 28, 2025\n\n")
-
-            # Representative details
-            f.write(f"{self.rep_name}\n")
-            f.write(f"{self.rep_address}\n")
-            f.write(f"{self.rep_phone}\n")
-            f.write(f"Email: {self.rep_email}\n")
-            f.write(f"Website: {self.rep_website}\n\n")
+            f.write(f"{rep_info['rep_name']}\n")
+            f.write(f"{rep_info['rep_address']}\n")
+            f.write(f"{rep_info['rep_phone']}\n")
+            f.write(f"Email: {rep_info['rep_email']}\n")
+            f.write(f"Website: {rep_info['rep_website']}\n\n")
 
             # Column headers
             f.write(f"{'Page':<8}{'Product #':<12}{'Product':<40}{'Qty':>6}{'Price':>10}{'Total':>10}\n")
             f.write("-" * 90 + "\n")
 
-            # Order items
             total_price = 0
             for row in range(self.order_table.rowCount()):
                 page = self.order_table.item(row, 1).text() if self.order_table.item(row, 1) else ""
@@ -589,12 +787,9 @@ class OrderEntryDialog(QDialog):
                 total = self.order_table.item(row, 10).text() if self.order_table.item(row, 10) else "$0.00"
 
                 f.write(f"{page:<8}{product_number:<12}{description:<40}{qty:>6}{price:>10}{total:>10}\n")
-
                 total_price += float(total.replace("$", ""))
 
             f.write("-" * 90 + "\n")
-
-            # Subtotal, processing, tax, grand total
             processing_charge = 0.50
             tax_rate = 9.386 / 100
             tax_amount = total_price * tax_rate
@@ -608,6 +803,6 @@ class OrderEntryDialog(QDialog):
             f.write(" " * 30 + "Thank You\n")
             f.write("_" * 90 + "\n")
 
-        os.startfile(print_file, "print")  # Open print dialog
+        import os
+        os.startfile(print_file, "print")
         QMessageBox.information(self, "Print", "Order sent to printer!")
-
