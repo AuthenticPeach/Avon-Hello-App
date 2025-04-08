@@ -81,6 +81,52 @@ def force_update_order_products():
     conn.close()
     print("✅ order_products table successfully updated!")
 
+def update_representative_info_table():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    print("🔄 Updating representative_info table with new columns if necessary...")
+
+    # Ensure the table exists
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS representative_info (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            rep_name TEXT,
+            rep_address TEXT,
+            rep_phone TEXT,
+            rep_email TEXT,
+            rep_website TEXT
+        )
+    """)
+
+    # Get existing columns
+    cursor.execute("PRAGMA table_info(representative_info)")
+    existing_columns = [col[1] for col in cursor.fetchall()]
+
+    # Add rep_cell column if it doesn't exist
+    if "rep_cell" not in existing_columns:
+        try:
+            cursor.execute("ALTER TABLE representative_info ADD COLUMN rep_cell TEXT")
+            print("✅ Added rep_cell column.")
+        except sqlite3.OperationalError as e:
+            print("⚠️ Error adding rep_cell:", e)
+    else:
+        print("ℹ️ rep_cell column already exists.")
+
+    # Add rep_office column if it doesn't exist
+    if "rep_office" not in existing_columns:
+        try:
+            cursor.execute("ALTER TABLE representative_info ADD COLUMN rep_office TEXT")
+            print("✅ Added rep_office column.")
+        except sqlite3.OperationalError as e:
+            print("⚠️ Error adding rep_office:", e)
+    else:
+        print("ℹ️ rep_office column already exists.")
+
+    conn.commit()
+    conn.close()
+
 if __name__ == "__main__":
     update_orders_table()
     force_update_order_products()
+    update_representative_info_table()

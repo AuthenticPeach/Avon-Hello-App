@@ -19,7 +19,7 @@ def get_representative_info():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT rep_name, rep_address, rep_phone, rep_email, rep_website 
+        SELECT rep_name, rep_address, rep_phone, rep_email, rep_website, rep_cell, rep_office 
         FROM representative_info 
         ORDER BY id DESC LIMIT 1
     """)
@@ -31,13 +31,18 @@ def get_representative_info():
             "rep_address": rep_info[1],
             "rep_phone": rep_info[2],
             "rep_email": rep_info[3],
-            "rep_website": rep_info[4]
+            "rep_website": rep_info[4],
+            "rep_cell_phone": rep_info[5],
+            "rep_office_phone": rep_info[6],
         }
     else:
         return {
-            "rep_name": "Representative Name",
-            "rep_address": "Representative Address",
-            "rep_phone": "Representative Phone",
-            "rep_email": "Representative Email",
-            "rep_website": "Representative Website"
+            "rep_name": "Ambassador Name",
+            "rep_address": "Ambassador Address",
+            "rep_phone": "000-000-0000",
+            "rep_email": "email@example.com",
+            "rep_website": "www.example.com",
+            "rep_cell_phone": "000-000-0000",
+            "rep_office_phone": "000-000-0000",
         }
+

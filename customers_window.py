@@ -1,39 +1,90 @@
 from PyQt5.QtCore import Qt
 import sqlite3
 import os
+import configparser
 
+from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import (
     QMainWindow, QVBoxLayout, QPushButton, QTreeWidget, 
     QTreeWidgetItem, QWidget, QLabel, QLineEdit, QHBoxLayout, 
     QRadioButton, QMessageBox, QDialog, QComboBox, QGroupBox,
-    QCheckBox, QTableWidget, QHeaderView, QTableWidgetItem
+    QCheckBox, QTableWidget, QHeaderView, QTableWidgetItem, QCheckBox
 )
 
 from db_utils import get_representative_info
 from db_utils import get_current_campaign_settings
 from datetime import datetime
 
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.units import inch
+from reportlab.lib import colors
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.styles import ParagraphStyle
+
 DB_PATH = "avon_hello.db"
+SETTINGS_FILE = "settings.conf"
+
+def is_dark_mode_enabled():
+    config = configparser.ConfigParser()
+    if os.path.exists(SETTINGS_FILE):
+        config.read(SETTINGS_FILE)
+        return config.getboolean("Appearance", "dark_mode", fallback=False)
+    return False
 
 class CustomersWindow(QMainWindow):
     """Customers Search with Editable Customer Window."""
-    
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Customer Search")
+        self.setWindowIcon(QIcon("Avon256.png"))
         self.setGeometry(250, 250, 800, 500)
-
         self.init_ui()
-    
+
+    def apply_stylesheet(self):
+        if is_dark_mode_enabled():
+            self.setStyleSheet("""
+                QWidget {
+                    background-color: #121212;
+                    color: #f0f0f0;
+                }
+                QPushButton {
+                    background-color: #2c3e50;
+                    color: white;
+                    padding: 6px;
+                }
+                QLineEdit, QComboBox, QTreeWidget {
+                    background-color: #1e1e1e;
+                    color: white;
+                    border: 1px solid #333;
+                }
+                QTreeWidget::item {
+                    color: #f0f0f0;
+                }
+                QLabel, QRadioButton {
+                    color: #f0f0f0;
+                }
+                QHeaderView::section {
+                background-color: #2c3e50;
+                color: white;
+                padding: 4px;
+                border: 1px solid #444;
+                }                              
+            """)
+        else:
+            self.setStyleSheet("")
+
     def init_ui(self):
+        self.apply_stylesheet()
+
         layout = QVBoxLayout()
 
-        # Header Label
         header_label = QLabel("Customer Search", self)
-        header_label.setStyleSheet("font-size: 24px; font-weight: bold; background-color: blue; color: white; padding: 10px;")
+        header_label.setStyleSheet("font-size: 24px; font-weight: bold; background-color: #2c3e50; color: white; padding: 10px;")
         layout.addWidget(header_label)
 
-        # Search Fields
         search_layout = QHBoxLayout()
         self.first_name_input = QLineEdit()
         self.first_name_input.setPlaceholderText("First Name")
@@ -47,10 +98,9 @@ class CustomersWindow(QMainWindow):
 
         layout.addLayout(search_layout)
 
-        # Search Results Sorting Options
         self.sort_by_first = QRadioButton("By First Name")
         self.sort_by_last = QRadioButton("By Last Name")
-        self.sort_by_last.setChecked(True)  # Default selection
+        self.sort_by_last.setChecked(True)
 
         sort_layout = QHBoxLayout()
         sort_layout.addWidget(QLabel("Group By:"))
@@ -59,21 +109,19 @@ class CustomersWindow(QMainWindow):
 
         layout.addLayout(sort_layout)
 
-        # Customer Tree Structure
         self.customer_tree = QTreeWidget()
         self.customer_tree.setHeaderLabels(["Customer Name", "Details"])
-
-        # Set column width for better spacing
-        self.customer_tree.setColumnWidth(0, 250)  # Adjust width of the "Customer Name" column
-
-        self.customer_tree.itemDoubleClicked.connect(self.open_edit_customer)  # Double-click opens edit
+        self.customer_tree.setColumnWidth(0, 250)
+        self.customer_tree.itemDoubleClicked.connect(self.open_edit_customer)
         layout.addWidget(self.customer_tree)
 
-        # Buttons for Expand/Collapse
         btn_tree_layout = QHBoxLayout()
         self.btn_expand = QPushButton("Expand All")
         self.btn_collapse = QPushButton("Collapse All")
         self.btn_refresh_tree = QPushButton("Refresh Tree")
+
+        for btn in (self.btn_expand, self.btn_collapse, self.btn_refresh_tree):
+            btn.setStyleSheet("padding: 6px; font-size: 13px;")
 
         self.btn_expand.clicked.connect(self.expand_tree)
         self.btn_collapse.clicked.connect(self.collapse_tree)
@@ -84,11 +132,14 @@ class CustomersWindow(QMainWindow):
         btn_tree_layout.addWidget(self.btn_refresh_tree)
         layout.addLayout(btn_tree_layout)
 
-        # Bottom Buttons
         btn_layout = QHBoxLayout()
         self.btn_all_customers = QPushButton("All Customers")
         self.btn_add_customer = QPushButton("Add Customer")
         self.btn_exit = QPushButton("Exit")
+
+        self.btn_all_customers.setStyleSheet("background-color: #3498db; color: white; font-size: 14px; padding: 6px;")
+        self.btn_add_customer.setStyleSheet("background-color: #2ecc71; color: white; font-size: 14px; padding: 6px;")
+        self.btn_exit.setStyleSheet("background-color: #e74c3c; color: white; font-size: 14px; padding: 6px;")
 
         btn_layout.addWidget(self.btn_all_customers)
         btn_layout.addWidget(self.btn_add_customer)
@@ -96,18 +147,16 @@ class CustomersWindow(QMainWindow):
 
         layout.addLayout(btn_layout)
 
-        # Connect Buttons
         self.btn_all_customers.clicked.connect(self.load_customers)
         self.btn_add_customer.clicked.connect(self.add_customer_dialog)
         self.btn_exit.clicked.connect(self.close)
 
-        # Set Layout
         central_widget = QWidget()
         central_widget.setLayout(layout)
         self.setCentralWidget(central_widget)
 
-        # Load All Customers Initially
         self.load_customers()
+
     def add_customer_dialog(self):
         """Open Add Customer Dialog."""
         dialog = AddCustomerDialog(self)
@@ -129,13 +178,8 @@ class CustomersWindow(QMainWindow):
         self.customer_tree.clear()
         letter_groups = {}
 
-        # Determine sorting type
-        if self.sort_by_first.isChecked():
-            sort_key = 1  # First Name
-        else:
-            sort_key = 2  # Last Name
+        sort_key = 1 if self.sort_by_first.isChecked() else 2
 
-        # Organize customers by first letter of their name
         for row in rows:
             customer_id, first_name, last_name = row
             key = first_name[0].upper() if self.sort_by_first.isChecked() else last_name[0].upper()
@@ -145,7 +189,7 @@ class CustomersWindow(QMainWindow):
                 self.customer_tree.addTopLevelItem(letter_groups[key])
 
             customer_item = QTreeWidgetItem(letter_groups[key], [f"{first_name} {last_name} (#{customer_id})"])
-            customer_item.setData(0, Qt.UserRole, customer_id)  # Store customer ID for easy lookup
+            customer_item.setData(0, Qt.UserRole, customer_id)
             letter_groups[key].addChild(customer_item)
 
         self.customer_tree.expandAll()
@@ -168,13 +212,17 @@ class CustomersWindow(QMainWindow):
 
 class EditCustomerDialog(QDialog):
     """Dialog to Edit a Customer and View Orders."""
-    
+
     def __init__(self, customer_id, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Edit Customer")
         self.customer_id = customer_id
-        
+        self.setWindowTitle("Edit Customer")
+
         layout = QVBoxLayout()
+        self.setLayout(layout)
+
+        label = QLabel(f"Editing customer ID: {customer_id}")
+        layout.addWidget(label)
 
         # Fetch customer data
         conn = sqlite3.connect(DB_PATH)
@@ -194,7 +242,9 @@ class EditCustomerDialog(QDialog):
                 order_total REAL DEFAULT 0,
                 previous_balance REAL DEFAULT 0,
                 payment REAL DEFAULT 0,
-                net_due REAL DEFAULT 0
+                net_due REAL DEFAULT 0,
+                time_submitted TEXT DEFAULT CURRENT_TIMESTAMP,
+                last_edited TEXT DEFAULT CURRENT_TIMESTAMP
             )
         """)
         cursor.execute("""
@@ -209,7 +259,7 @@ class EditCustomerDialog(QDialog):
             self.reject()
             return
 
-        # Create fields
+        # Customer fields
         self.first_name_input = QLineEdit(customer[0])
         self.last_name_input = QLineEdit(customer[1])
         self.address_input = QLineEdit(customer[2])
@@ -223,36 +273,28 @@ class EditCustomerDialog(QDialog):
         self.status_input.addItems(["Active", "Closed", "Deleted"])
         self.status_input.setCurrentText(customer[8])
 
-        # Layout fields
-        layout.addWidget(QLabel("First Name:"))
-        layout.addWidget(self.first_name_input)
-        layout.addWidget(QLabel("Last Name:"))
-        layout.addWidget(self.last_name_input)
-        layout.addWidget(QLabel("Address:"))
-        layout.addWidget(self.address_input)
-        layout.addWidget(QLabel("City:"))
-        layout.addWidget(self.city_input)
-        layout.addWidget(QLabel("State:"))
-        layout.addWidget(self.state_input)
-        layout.addWidget(QLabel("ZIP Code:"))
-        layout.addWidget(self.zip_code_input)
-        layout.addWidget(QLabel("Phone:"))
-        layout.addWidget(self.phone_input)
-        layout.addWidget(QLabel("Email:"))
-        layout.addWidget(self.email_input)
-        layout.addWidget(QLabel("Status:"))
-        layout.addWidget(self.status_input)
+        for label_text, widget in [
+            ("First Name:", self.first_name_input),
+            ("Last Name:", self.last_name_input),
+            ("Address:", self.address_input),
+            ("City:", self.city_input),
+            ("State:", self.state_input),
+            ("ZIP Code:", self.zip_code_input),
+            ("Phone:", self.phone_input),
+            ("Email:", self.email_input),
+            ("Status:", self.status_input)
+        ]:
+            layout.addWidget(QLabel(label_text))
+            layout.addWidget(widget)
 
-        # Order Summary Section
+        # Order Summary
         order_group = QGroupBox("Order Summary (Current Campaign)")
         order_layout = QVBoxLayout()
 
-        # Use current campaign settings from options_window
-        current_year, current_campaign = get_current_campaign_settings()       
+        current_year, current_campaign = get_current_campaign_settings()
         self.order_year = QLabel(f"Campaign Year: {current_year}")
         self.order_campaign = QLabel(f"Campaign Number: {current_campaign}")
 
-        # Populate order summary based on order_data if it exists
         if order_data:
             self.order_total = QLabel(f"Order Total: ${order_data[2]:.2f}")
             self.previous_balance = QLabel(f"Previous Balance: ${order_data[3]:.2f}")
@@ -267,60 +309,48 @@ class EditCustomerDialog(QDialog):
         self.time_submitted_label = QLabel("Time Submitted: N/A")
         self.last_edited_label = QLabel("Last Edited: N/A")
 
-        order_layout.addWidget(self.order_year)
-        order_layout.addWidget(self.order_campaign)
-        order_layout.addWidget(self.order_total)
-        order_layout.addWidget(self.previous_balance)
-        order_layout.addWidget(self.payment)
-        order_layout.addWidget(self.net_due)
-        order_layout.addWidget(self.time_submitted_label)
-        order_layout.addWidget(self.last_edited_label)         
+        for widget in [
+            self.order_year, self.order_campaign, self.order_total,
+            self.previous_balance, self.payment, self.net_due,
+            self.time_submitted_label, self.last_edited_label
+        ]:
+            order_layout.addWidget(widget)
+
         order_group.setLayout(order_layout)
         layout.addWidget(order_group)
 
-        # Order Entry Button
+        # Buttons and controls
         self.btn_order_entry = QPushButton("New Order Entry")
         self.btn_order_entry.clicked.connect(self.open_order_entry)
         layout.addWidget(self.btn_order_entry)
 
-        # --- Order History Section ---
         self.order_history = QComboBox()
         self.order_history.currentIndexChanged.connect(self.display_order_details)
         layout.addWidget(QLabel("Order History:"))
         layout.addWidget(self.order_history)
         self.load_order_history()
 
-        # Refresh Order Summary Button
         btn_refresh_summary = QPushButton("Refresh Order Summary")
         btn_refresh_summary.clicked.connect(self.refresh_order_summary)
         layout.addWidget(btn_refresh_summary)
 
-        # View Order Details Button
         self.btn_view_order = QPushButton("View Order Details")
         self.btn_view_order.clicked.connect(self.view_order_details)
         layout.addWidget(self.btn_view_order)
 
-        # Save & Delete Buttons
         btn_save = QPushButton("Save Changes")
         btn_save.clicked.connect(self.save_customer)
         layout.addWidget(btn_save)
 
-        self.setLayout(layout)
-
     def open_order_entry(self):
-        """Open Order Entry Window using current campaign settings."""
         current_year, current_campaign = get_current_campaign_settings()
         self.order_entry_dialog = OrderEntryDialog(self.customer_id, current_year, current_campaign, self)
         self.order_entry_dialog.exec_()
-        # Automatically refresh the summary after closing the order entry dialog
         self.refresh_order_summary()
 
     def refresh_order_summary(self):
-        """Refresh the order summary information and Order History list for the current customer."""
-        print("Refreshing order summary for customer:", self.customer_id)  # Debug print
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        # Note: We now select two extra columns: time_submitted and last_edited.
         cursor.execute("""
             SELECT campaign_year, campaign_number, order_total, previous_balance, payment, net_due, time_submitted, last_edited
             FROM orders 
@@ -329,7 +359,6 @@ class EditCustomerDialog(QDialog):
         """, (self.customer_id,))
         order_data = cursor.fetchone()
         conn.close()
-        print("Fetched order_data:", order_data)  # Debug print
 
         current_year, current_campaign = get_current_campaign_settings()
         self.order_year.setText(f"Campaign Year: {current_year}")
@@ -350,12 +379,9 @@ class EditCustomerDialog(QDialog):
             self.time_submitted_label.setText("Time Submitted: N/A")
             self.last_edited_label.setText("Last Edited: N/A")
 
-        # Refresh the Order History list as well.
         self.load_order_history()
 
-       
     def save_customer(self):
-        """Save updated customer details to database."""
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute("""
@@ -374,10 +400,8 @@ class EditCustomerDialog(QDialog):
         self.accept()
 
     def load_order_history(self):
-        """Load past orders for the customer into the order history combo box."""
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        # Updated: Order by time_submitted instead of order_date
         cursor.execute("""
             SELECT order_id, campaign_year, campaign_number, order_total, net_due
             FROM orders 
@@ -403,19 +427,22 @@ class EditCustomerDialog(QDialog):
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT campaign_year, campaign_number, order_total, previous_balance, payment, net_due
+            SELECT campaign_year, campaign_number, order_total, previous_balance, payment, net_due, time_submitted, last_edited
             FROM orders
             WHERE order_id = ?
         """, (order_id,))
-        order = cursor.fetchone()
+        order_data = cursor.fetchone()
         conn.close()
-        if order:
-            self.order_year.setText(f"Campaign Year: {order[0]}")
-            self.order_campaign.setText(f"Campaign Number: {order[1]}")
-            self.order_total.setText(f"Order Total: ${order[2]:.2f}")
-            self.previous_balance.setText(f"Previous Balance: ${order[3]:.2f}")
-            self.payment.setText(f"Payment: ${order[4]:.2f}")
-            self.net_due.setText(f"Net Due: ${order[5]:.2f}")
+
+        if order_data:
+            self.order_year.setText(f"Campaign Year: {order_data[0]}")
+            self.order_campaign.setText(f"Campaign Number: {order_data[1]}")
+            self.order_total.setText(f"Order Total: ${order_data[2]:.2f}")
+            self.previous_balance.setText(f"Previous Balance: ${order_data[3]:.2f}")
+            self.payment.setText(f"Payment: ${order_data[4]:.2f}")
+            self.net_due.setText(f"Net Due: ${order_data[5]:.2f}")
+            self.time_submitted_label.setText(f"Time Submitted: {order_data[6]}")
+            self.last_edited_label.setText(f"Last Edited: {order_data[7]}")
 
     def view_order_details(self):
         index = self.order_history.currentIndex()
@@ -424,20 +451,17 @@ class EditCustomerDialog(QDialog):
         order_id = self.order_history.itemData(index)
         if order_id is None:
             return
-        # Open OrderEntryDialog with the selected order's details.
-        # We pass the order_id so that the dialog knows to load existing data.
-        # (The campaign_year and campaign_number parameters will be overridden by the loaded order details.)
         dialog = OrderEntryDialog(self.customer_id, 0, 0, self, order_id=order_id)
         dialog.exec_()
-    
+   
            
 class AddCustomerDialog(QDialog):
     """Dialog to Add a New Customer."""
-    
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Add Customer")
-        
+
         layout = QVBoxLayout()
 
         self.first_name_input = QLineEdit()
@@ -449,16 +473,33 @@ class AddCustomerDialog(QDialog):
         layout.addWidget(self.last_name_input)
 
         btn_save = QPushButton("Save")
+        btn_save.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; padding: 6px;")
         btn_save.clicked.connect(self.save_customer)
 
         layout.addWidget(btn_save)
         self.setLayout(layout)
 
-        # Order History List
-        self.order_history = QComboBox()
-        self.load_order_history()  # Load previous orders on open
-        layout.addWidget(QLabel("Order History:"))
-        layout.addWidget(self.order_history)
+    def save_customer(self):
+        
+        """Save new customer to the database."""
+        first_name = self.first_name_input.text().strip()
+        last_name = self.last_name_input.text().strip()
+
+        if not first_name or not last_name:
+            QMessageBox.warning(self, "Missing Fields", "Please enter both first and last names.")
+            return
+
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO customers (first_name, last_name, address, city, state, zip_code, phone, email, status)
+            VALUES (?, ?, '', '', '', '', '', '', 'Active')
+        """, (first_name, last_name))
+        conn.commit()
+        conn.close()
+
+        QMessageBox.information(self, "Success", "Customer added successfully.")
+        self.accept()
 
 
 class OrderEntryDialog(QDialog):
@@ -490,7 +531,7 @@ class OrderEntryDialog(QDialog):
         # Set up Order Table
         self.order_table = QTableWidget(0, 11)
         self.order_table.setHorizontalHeaderLabels([
-            "Product Number", "Page", "Description", "Shade/Fragrance", "Size", "QTY",
+            "Product #", "Page", "Description", "Shade/Fragrance", "Size", "QTY",
             "Unit Price", "Reg Price", "Tax", "Discount %", "Total Price"
         ])
         self.order_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
@@ -753,56 +794,131 @@ class OrderEntryDialog(QDialog):
             QMessageBox.critical(self, "Error", f"An error occurred while saving the order: {e}")
 
     def print_order(self):
-        """Generate a formatted order printout."""
+        from reportlab.lib.pagesizes import letter
+        from reportlab.pdfgen import canvas
+        from reportlab.lib import colors
+        from reportlab.platypus import Table, TableStyle
+        from reportlab.lib.units import inch
+        from datetime import datetime
+        from db_utils import get_representative_info
+
+        def format_phone(raw):
+            raw = raw.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+            return f"({raw[:3]}) {raw[3:6]}-{raw[6:]}" if len(raw) == 10 else raw
+
         rep_info = get_representative_info()
-        
-        print_file = "order_summary.txt"
-        with open(print_file, "w") as f:
-            f.write(" " * 20 + "AVON BY MONICA\n")
-            f.write(" " * 18 + "*** CUSTOMER ORDER ***\n\n")
+        campaign_number = self.parent().campaign_number if hasattr(self.parent(), "campaign_number") else "7"
+        campaign_date = datetime.now().strftime("%A, %B %d, %Y")
+        today_str = datetime.now().strftime("%Y-%m-%d")
 
-            f.write(f"Campaign # {self.campaign_number} \n")
-            f.write(f"{self.order_date}\n\n")
+        customer_name = f"{self.parent().first_name_input.text()} {self.parent().last_name_input.text()}"
+        customer_address = self.parent().address_input.text()
+        raw_phone = self.parent().phone_input.text()
+        customer_phone = format_phone(raw_phone)
 
-            # Use representative details from the database
-            f.write(f"Campaign # {self.campaign_number} - {self.campaign_year}\n")
-            f.write("Tuesday, January 28, 2025\n\n")
-            f.write(f"{rep_info['rep_name']}\n")
-            f.write(f"{rep_info['rep_address']}\n")
-            f.write(f"{rep_info['rep_phone']}\n")
-            f.write(f"Email: {rep_info['rep_email']}\n")
-            f.write(f"Website: {rep_info['rep_website']}\n\n")
+        filename = f"invoice-{customer_name.replace(' ', '_').lower()}-{today_str}.pdf"
+        c = canvas.Canvas(filename, pagesize=letter)
+        width, height = letter
 
-            # Column headers
-            f.write(f"{'Page':<8}{'Product #':<12}{'Product':<40}{'Qty':>6}{'Price':>10}{'Total':>10}\n")
-            f.write("-" * 90 + "\n")
+        # --- Header ---
+        c.setFont("Helvetica", 9)
 
-            total_price = 0
-            for row in range(self.order_table.rowCount()):
-                page = self.order_table.item(row, 1).text() if self.order_table.item(row, 1) else ""
-                product_number = self.order_table.item(row, 0).text() if self.order_table.item(row, 0) else ""
-                description = self.order_table.item(row, 2).text() if self.order_table.item(row, 2) else ""
-                qty = self.order_table.item(row, 5).text() if self.order_table.item(row, 5) else "0"
-                price = self.order_table.item(row, 6).text() if self.order_table.item(row, 6) else "$0.00"
-                total = self.order_table.item(row, 10).text() if self.order_table.item(row, 10) else "$0.00"
+        # Customer Info (Top Left)
+        c.drawString(40, 770, customer_name)
+        c.drawString(40, 755, customer_address)
+        c.drawString(40, 740, customer_phone)
 
-                f.write(f"{page:<8}{product_number:<12}{description:<40}{qty:>6}{price:>10}{total:>10}\n")
-                total_price += float(total.replace("$", ""))
+        # Rep Info (Top Right)
+        y = 770
+        c.drawRightString(width - 40, y, rep_info["rep_name"])
+        c.drawRightString(width - 40, y - 15, rep_info["rep_address"])
+        c.drawRightString(width - 40, y - 30, f"Office: {format_phone(rep_info['rep_office_phone'])}")
+        c.drawRightString(width - 40, y - 45, f"Email: {rep_info['rep_email']}")
+        c.drawRightString(width - 40, y - 60, f"Visit my website at: {rep_info['rep_website']}")
+        c.drawRightString(width - 40, y - 75, f"Cell/Text: {format_phone(rep_info['rep_cell_phone'])}")
 
-            f.write("-" * 90 + "\n")
-            processing_charge = 0.50
-            tax_rate = 9.386 / 100
-            tax_amount = total_price * tax_rate
-            grand_total = total_price + processing_charge + tax_amount
+        # Centered Title
+        c.setFont("Helvetica-Bold", 13)
+        c.drawCentredString(width / 2, 735, f"AVON BY {rep_info['rep_name']}")
+        c.setFont("Helvetica-Bold", 11)
+        c.drawCentredString(width / 2, 720, "*** CUSTOMER ORDER ***")
+        c.setFont("Helvetica", 10)
+        c.drawCentredString(width / 2, 705, f"Campaign #{campaign_number}")
+        c.drawCentredString(width / 2, 690, campaign_date)
 
-            f.write(f"{'':<60}{'Sub Total':<15}${total_price:.2f}\n")
-            f.write(f"{'':<60}{'Processing Charge':<15}${processing_charge:.2f}\n")
-            f.write(f"{'':<60}{'TAX1 9.386%':<15}${tax_amount:.2f}\n")
-            f.write(f"{'':<60}{'Grand Total':<15}${grand_total:.2f}\n\n")
+        # --- Product Table ---
+        data = [["Page", "Product #", "Product", "Qty", "Unit Price", "Total"]]
+        for row in range(self.order_table.rowCount()):
+            page = self.order_table.item(row, 1).text()
+            prod = self.order_table.item(row, 0).text()
+            desc = self.order_table.item(row, 2).text()
+            qty = self.order_table.item(row, 5).text()
+            unit_price = self.order_table.item(row, 6).text()
+            total = self.order_table.item(row, 10).text()
+            data.append([page, prod, desc, qty, unit_price, total])
 
-            f.write(" " * 30 + "Thank You\n")
-            f.write("_" * 90 + "\n")
+        table = Table(data, colWidths=[0.7*inch, 1*inch, 2.4*inch, 0.6*inch, 1*inch, 1*inch])
+        table.setStyle(TableStyle([
+            ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+            ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+            ('ALIGN', (0,0), (-1,0), 'CENTER'),
+            ('ALIGN', (3,1), (-1,-1), 'RIGHT'),
+            ('FONT', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('FONT', (0,1), (-1,-1), 'Helvetica'),
+        ]))
+        table.wrapOn(c, width, height)
+        table.drawOn(c, 60, 520)
 
-        import os
-        os.startfile(print_file, "print")
-        QMessageBox.information(self, "Print", "Order sent to printer!")
+        # --- Totals Section ---
+        total_price = 0.0
+        total_discount = 0.0
+
+        for row in range(self.order_table.rowCount()):
+            total_cell = self.order_table.item(row, 10)
+            discount_cell = self.order_table.item(row, 11)
+
+            if total_cell:
+                total_price += float(total_cell.text().replace("$", ""))
+
+            if discount_cell:
+                discount_value = float(discount_cell.text().replace("$", ""))
+                total_discount += discount_value
+
+        processing_charge = 0.50
+        tax_rate = 9.386 / 100
+        tax_amount = round(total_price * tax_rate, 2)
+        grand_total = round(total_price + processing_charge + tax_amount, 2)
+
+        # Build totals table rows
+        totals_data = [["Sub Total:", f"${total_price:.2f}"]]
+
+        if total_discount > 0:
+            totals_data.append(["Line Item Discounts:", f"-${total_discount:.2f}"])
+
+        totals_data.extend([
+            ["Processing:", f"${processing_charge:.2f}"],
+            ["Tax (9.386%):", f"${tax_amount:.2f}"],
+            ["Grand Total:", f"${grand_total:.2f}"],
+        ])
+
+        totals_table = Table(totals_data, colWidths=[1.5*inch, 1*inch])
+        totals_table.setStyle(TableStyle([
+            ('ALIGN', (0,0), (-1,-1), 'RIGHT'),
+            ('FONT', (0,0), (-1,-2), 'Helvetica'),
+            ('FONT', (0,-1), (-1,-1), 'Helvetica-Bold'),
+            ('TEXTCOLOR', (0,-1), (-1,-1), colors.black),
+            ('LINEABOVE', (0,-1), (-1,-1), 1, colors.black),
+            ('TOPPADDING', (0,0), (-1,-1), 4),
+        ]))
+        totals_table.wrapOn(c, width, height)
+        totals_table.drawOn(c, width - 220, 400)
+
+        # --- Thank You Message (just under totals) ---
+        c.setFont("Helvetica-Oblique", 10)
+        c.drawCentredString(width / 2, 385, "Thank you for your order!")
+
+        c.save()
+
+        # Auto open the PDF
+        import subprocess
+        subprocess.Popen([filename], shell=True)
