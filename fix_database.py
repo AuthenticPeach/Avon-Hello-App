@@ -2,131 +2,61 @@ import sqlite3
 
 DB_PATH = "avon_hello.db"
 
-def update_orders_table():
+def update_customers_phone_fields():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    print("🔄 Updating orders table with new columns if necessary...")
+    print("🔄 Updating 'customers' table to include 'cell_phone' and 'office_phone'...")
 
-    # Add time_submitted column without a default.
-    try:
-        cursor.execute("ALTER TABLE orders ADD COLUMN time_submitted TEXT")
-        print("✅ Added time_submitted column.")
-        # Update existing rows with the current local datetime.
-        cursor.execute("UPDATE orders SET time_submitted = datetime('now','localtime') WHERE time_submitted IS NULL")
-        print("✅ Updated time_submitted values.")
-    except sqlite3.OperationalError as e:
-        if "duplicate column name" in str(e) or "already exists" in str(e):
-            print("ℹ️ time_submitted column already exists.")
-        else:
-            print("⚠️ Error adding time_submitted:", e)
-
-    # Add last_edited column without a default.
-    try:
-        cursor.execute("ALTER TABLE orders ADD COLUMN last_edited TEXT")
-        print("✅ Added last_edited column.")
-        # Update existing rows with the current local datetime.
-        cursor.execute("UPDATE orders SET last_edited = datetime('now','localtime') WHERE last_edited IS NULL")
-        print("✅ Updated last_edited values.")
-    except sqlite3.OperationalError as e:
-        if "duplicate column name" in str(e) or "already exists" in str(e):
-            print("ℹ️ last_edited column already exists.")
-        else:
-            print("⚠️ Error adding last_edited:", e)
-
-    conn.commit()
-    conn.close()
-
-def force_update_order_products():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    print("🔄 Forcing order_products table update...")
-
-    # Rename the old order_products table.
-    cursor.execute("ALTER TABLE order_products RENAME TO old_order_products;")
-
-    # Create a new order_products table with the desired schema.
-    cursor.execute("""
-        CREATE TABLE order_products (
-            product_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            order_id INTEGER,
-            product_number TEXT,
-            page TEXT,
-            description TEXT,
-            shade TEXT,
-            size TEXT,
-            qty INTEGER,
-            unit_price REAL,
-            reg_price REAL,
-            tax INTEGER,
-            discount REAL,
-            total_price REAL,
-            FOREIGN KEY (order_id) REFERENCES orders(order_id)
-        )
-    """)
-
-    # Copy data from old_order_products to the new order_products table.
-    # (If order_id existed in the old table, adjust accordingly.)
-    cursor.execute("""
-        INSERT INTO order_products (order_id, product_number, page, description, shade, size, qty, unit_price, reg_price, tax, discount, total_price)
-        SELECT NULL, product_number, page, description, shade, size, qty, unit_price, reg_price, tax, discount, total_price
-        FROM old_order_products;
-    """)
-
-    # Drop the old table.
-    cursor.execute("DROP TABLE old_order_products;")
-
-    conn.commit()
-    conn.close()
-    print("✅ order_products table successfully updated!")
-
-def update_representative_info_table():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    print("🔄 Updating representative_info table with new columns if necessary...")
-
-    # Ensure the table exists
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS representative_info (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            rep_name TEXT,
-            rep_address TEXT,
-            rep_phone TEXT,
-            rep_email TEXT,
-            rep_website TEXT
-        )
-    """)
-
-    # Get existing columns
-    cursor.execute("PRAGMA table_info(representative_info)")
+    # Step 1: Check if the columns already exist
+    cursor.execute("PRAGMA table_info(customers)")
     existing_columns = [col[1] for col in cursor.fetchall()]
 
-    # Add rep_cell column if it doesn't exist
-    if "rep_cell" not in existing_columns:
-        try:
-            cursor.execute("ALTER TABLE representative_info ADD COLUMN rep_cell TEXT")
-            print("✅ Added rep_cell column.")
-        except sqlite3.OperationalError as e:
-            print("⚠️ Error adding rep_cell:", e)
-    else:
-        print("ℹ️ rep_cell column already exists.")
+    if "cell_phone" in existing_columns and "office_phone" in existing_columns:
+        print("ℹ️ 'cell_phone' and 'office_phone' already exist. No changes needed.")
+        conn.close()
+        return
 
-    # Add rep_office column if it doesn't exist
-    if "rep_office" not in existing_columns:
-        try:
-            cursor.execute("ALTER TABLE representative_info ADD COLUMN rep_office TEXT")
-            print("✅ Added rep_office column.")
-        except sqlite3.OperationalError as e:
-            print("⚠️ Error adding rep_office:", e)
+    # Step 2: Rename original table
+    cursor.execute("ALTER TABLE customers RENAME TO old_customers")
+
+    # Step 3: Create new table with updated schema
+    cursor.execute("""
+        CREATE TABLE customers (
+            customer_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            first_name TEXT,
+            last_name TEXT,
+            address TEXT,
+            city TEXT,
+            state TEXT,
+            zip_code TEXT,
+            cell_phone TEXT,
+            office_phone TEXT,
+            email TEXT,
+            status TEXT
+        )
+    """)
+
+    # Step 4: Copy data from old table to new one
+    if "cell_phone" in existing_columns and "office_phone" in existing_columns:
+        cursor.execute("""
+            INSERT INTO customers (customer_id, first_name, last_name, address, city, state, zip_code, cell_phone, office_phone, email, status)
+            SELECT customer_id, first_name, last_name, address, city, state, zip_code, cell_phone, office_phone, email, status
+            FROM old_customers
+        """)
     else:
-        print("ℹ️ rep_office column already exists.")
+        cursor.execute("""
+            INSERT INTO customers (customer_id, first_name, last_name, address, city, state, zip_code, cell_phone, office_phone, email, status)
+            SELECT customer_id, first_name, last_name, address, city, state, zip_code, phone, '', email, status
+            FROM old_customers
+        """)
+
+    # Step 5: Drop old table
+    cursor.execute("DROP TABLE old_customers")
 
     conn.commit()
     conn.close()
+    print("✅ 'customers' table updated successfully!")
 
 if __name__ == "__main__":
-    update_orders_table()
-    force_update_order_products()
-    update_representative_info_table()
+    update_customers_phone_fields()
