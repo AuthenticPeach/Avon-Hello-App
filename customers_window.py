@@ -584,16 +584,22 @@ class OrderEntryDialog(QDialog):
         self.order_table.setItem(row_position, 2, QTableWidgetItem(""))  # Description
         self.order_table.setItem(row_position, 3, QTableWidgetItem(""))  # Shade/Fragrance
         self.order_table.setItem(row_position, 4, QTableWidgetItem(""))  # Size
-        self.order_table.setItem(row_position, 5, QTableWidgetItem("1"))  # QTY (Default: 1)
-        self.order_table.setItem(row_position, 6, QTableWidgetItem("$0.00"))  # Unit Price (Default)
-        self.order_table.setItem(row_position, 7, QTableWidgetItem("$0.00"))  # Reg Price (Default)
+        self.order_table.setItem(row_position, 5, QTableWidgetItem("1"))  # QTY
+        self.order_table.setItem(row_position, 6, QTableWidgetItem("$0.00"))  # Unit Price
+        self.order_table.setItem(row_position, 7, QTableWidgetItem("$0.00"))  # Reg Price
 
         # Checkbox for Tax
         tax_checkbox = QCheckBox()
         tax_checkbox.setChecked(False)
-        self.order_table.setCellWidget(row_position, 8, tax_checkbox)
+        tax_widget = QWidget()
+        tax_layout = QHBoxLayout(tax_widget)
+        tax_layout.addWidget(tax_checkbox)
+        tax_layout.setAlignment(Qt.AlignCenter)
+        tax_layout.setContentsMargins(0, 0, 0, 0)
+        self.order_table.setCellWidget(row_position, 8, tax_widget)
 
-        self.order_table.setItem(row_position, 9, QTableWidgetItem("0"))  # Discount %
+        # Discount %
+        self.order_table.setItem(row_position, 9, QTableWidgetItem("0"))
 
         # Ensure Total Price column starts with "$0.00"
         self.order_table.setItem(row_position, 10, QTableWidgetItem("$0.00"))
@@ -602,7 +608,7 @@ class OrderEntryDialog(QDialog):
         self.order_table.itemChanged.connect(self.update_total)
 
     def update_total(self, changed_item):
-        if changed_item is not None and changed_item.column() in (6, 7):
+        if changed_item and changed_item.column() in (6, 7):
             text = changed_item.text()
             if text and not text.startswith("$"):
                 self.order_table.blockSignals(True)
@@ -616,25 +622,21 @@ class OrderEntryDialog(QDialog):
                 qty_item = self.order_table.item(row, 5)
                 unit_price_item = self.order_table.item(row, 6)
                 discount_item = self.order_table.item(row, 9)
-                tax_checkbox = self.order_table.cellWidget(row, 8)
+                tax_widget = self.order_table.cellWidget(row, 8)
 
                 qty = float(qty_item.text()) if qty_item and qty_item.text().strip() else 0
                 unit_price = float(unit_price_item.text().replace("$", "")) if unit_price_item and unit_price_item.text().strip() else 0
                 discount = float(discount_item.text()) if discount_item and discount_item.text().strip() else 0
 
-                # Base and discounted price
                 base_price = unit_price * qty
                 discounted_price = base_price * ((100 - discount) / 100)
 
-                # Add tax if checked
-                if tax_checkbox and tax_checkbox.isChecked():
-                    tax_amount = discounted_price * 0.09386
-                else:
-                    tax_amount = 0.0
+                # Properly access checkbox inside widget
+                tax_checkbox = tax_widget.layout().itemAt(0).widget() if tax_widget and tax_widget.layout().count() > 0 else None
+                tax_amount = discounted_price * 0.09386 if tax_checkbox and tax_checkbox.isChecked() else 0.0
 
                 final_price = discounted_price + tax_amount
 
-                # Update total column
                 total_price_item = self.order_table.item(row, 10)
                 if not total_price_item:
                     self.order_table.setItem(row, 10, QTableWidgetItem(f"${final_price:.2f}"))
@@ -642,11 +644,12 @@ class OrderEntryDialog(QDialog):
                     total_price_item.setText(f"${final_price:.2f}")
 
                 total += final_price
-            except ValueError:
+
+            except Exception as e:
+                print(f"[Warning] Skipping row {row}: {e}")
                 continue
 
         self.total_label.setText(f"Total: ${total:.2f}")
-
 
     def open_order_entry(self):
         """Open Order Entry Window using current campaign settings."""
@@ -692,9 +695,18 @@ class OrderEntryDialog(QDialog):
             self.order_table.setItem(row_position, 5, QTableWidgetItem(str(product[5])))
             self.order_table.setItem(row_position, 6, QTableWidgetItem(f"${product[6]:.2f}"))
             self.order_table.setItem(row_position, 7, QTableWidgetItem(f"${product[7]:.2f}"))
+            
             tax_checkbox = QCheckBox()
             tax_checkbox.setChecked(bool(product[8]))
-            self.order_table.setCellWidget(row_position, 8, tax_checkbox)
+
+            tax_widget = QWidget()
+            tax_layout = QHBoxLayout(tax_widget)
+            tax_layout.addWidget(tax_checkbox)
+            tax_layout.setAlignment(Qt.AlignCenter)
+            tax_layout.setContentsMargins(0, 0, 0, 0)
+
+            self.order_table.setCellWidget(row_position, 8, tax_widget)
+
             self.order_table.setItem(row_position, 9, QTableWidgetItem(str(product[9])))
             self.order_table.setItem(row_position, 10, QTableWidgetItem(f"${product[10]:.2f}"))
         self.update_total(None)
@@ -899,8 +911,12 @@ class OrderEntryDialog(QDialog):
 
                 tax_widget = self.order_table.cellWidget(row, 8)
                 proc_widget = self.order_table.cellWidget(row, 7)
-                tax_checked = tax_widget and tax_widget.isChecked()
-                proc_checked = proc_widget and proc_widget.isChecked()
+
+                tax_checkbox = tax_widget.layout().itemAt(0).widget() if tax_widget and tax_widget.layout().count() > 0 else None
+                proc_checkbox = proc_widget.layout().itemAt(0).widget() if proc_widget and proc_widget.layout().count() > 0 else None
+
+                tax_checked = tax_checkbox.isChecked() if tax_checkbox else False
+                proc_checked = proc_checkbox.isChecked() if proc_checkbox else False
 
                 if proc_checked:
                     apply_processing = True
