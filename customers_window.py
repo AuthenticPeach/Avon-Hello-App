@@ -780,12 +780,12 @@ class OrderEntryDialog(QDialog):
                     shade = self.order_table.item(row, 3).text()
                     size = self.order_table.item(row, 4).text()
                     qty = int(self.order_table.item(row, 5).text())
-                    unit_price = float(self.order_table.item(row, 6).text().replace("$", ""))
-                    reg_price = float(self.order_table.item(row, 7).text().replace("$", ""))
+                    unit_price = float(self.order_table.item(row, 6).text().replace("$", "").strip())
+                    reg_price = float(self.order_table.item(row, 7).text().replace("$", "").strip())
                     tax_checkbox = self.order_table.cellWidget(row, 8)
                     tax = 1 if tax_checkbox and tax_checkbox.isChecked() else 0
                     discount = float(self.order_table.item(row, 9).text())
-                    total_price = float(self.order_table.item(row, 10).text().replace("$", ""))
+                    total_price = float(self.order_table.item(row, 10).text().replace("$", "").strip())
                     
                     cursor.execute("""
                         INSERT INTO order_products 
@@ -815,10 +815,15 @@ class OrderEntryDialog(QDialog):
         from reportlab.lib.units import inch
         from datetime import datetime
         from db_utils import get_representative_info
+        import math
 
         def format_phone(raw):
             digits = ''.join(filter(str.isdigit, raw))
             return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}" if len(digits) == 10 else raw
+        
+        def round_up(value):
+            return math.ceil(value * 100) / 100  # Always round up to the next cent
+
 
         rep_info = get_representative_info()
         campaign_number = self.parent().campaign_number if hasattr(self.parent(), "campaign_number") else "7"
@@ -875,116 +880,90 @@ class OrderEntryDialog(QDialog):
         styles = getSampleStyleSheet()
         normal_style = styles["Normal"]
 
-        # --- Product Table ---
+        # Order Table
         data = [["Page", "Product #", "Product", "Qty", "Unit Price", "Total"]]
+        subtotal = 0.0
+        total_discount = 0.0
+        apply_processing = False
+        apply_tax = False
+
         for row in range(self.order_table.rowCount()):
-            page = self.order_table.item(row, 1).text()
-            prod = self.order_table.item(row, 0).text()
-            desc = self.order_table.item(row, 2).text()
-
-            # Build discount text
-            discount_text = ""
-            qty_item = self.order_table.item(row, 5)
-            unit_price_item = self.order_table.item(row, 6)
-            discount_item = self.order_table.item(row, 9)
-
             try:
-                if qty_item and unit_price_item and discount_item:
-                    qty = float(qty_item.text())
-                    unit_price = float(unit_price_item.text().replace("$", ""))
-                    discount_pct = float(discount_item.text())
-                    if discount_pct > 0:
-                        discount_amt = qty * unit_price * (discount_pct / 100)
-                        discount_text = f" (Discount {discount_pct:.0f}% for -${discount_amt:.2f})"
-            except ValueError:
-                pass
+                page = self.order_table.item(row, 1).text()
+                product_number = self.order_table.item(row, 0).text()
+                description = self.order_table.item(row, 2).text()
+                qty = int(self.order_table.item(row, 5).text())
+                unit_price = float(self.order_table.item(row, 6).text().replace("$", "").strip())
+                reg_price = float(self.order_table.item(row, 7).text().replace("$", "").strip())
+                discount_percent = float(self.order_table.item(row, 9).text() or 0)
 
-            desc = Paragraph(desc + discount_text, normal_style)
-            # Recalculate per-line total like the grand total logic
-            try:
-                qty = float(self.order_table.item(row, 5).text())
-                unit_price = float(self.order_table.item(row, 6).text().replace("$", ""))
-                discount = float(self.order_table.item(row, 9).text())
-                discounted = unit_price * qty * ((100 - discount) / 100)
+                tax_widget = self.order_table.cellWidget(row, 8)
+                proc_widget = self.order_table.cellWidget(row, 7)
+                tax_checked = tax_widget and tax_widget.isChecked()
+                proc_checked = proc_widget and proc_widget.isChecked()
 
-                tax_checkbox = self.order_table.cellWidget(row, 8)
-                tax_amount = discounted * 0.09386 if tax_checkbox and tax_checkbox.isChecked() else 0.0
+                if proc_checked:
+                    apply_processing = True
+                if tax_checked:
+                    apply_tax = True
 
-                total = f"${(discounted + tax_amount):.2f}"
-            except Exception:
-                total = "$0.00"
+                unit_discount = reg_price * (discount_percent / 100)
+                discounted_price = unit_price - unit_discount
+                total_price = round_up(discounted_price * qty)
 
-            data.append([page, prod, desc, qty, unit_price, total])
+                if discount_percent > 0:
+                    discount_total = round_up(unit_discount * qty)
+                    description += f" (Discount {int(discount_percent)}% for -${discount_total:.2f})"
+                    total_discount += discount_total
 
-        table = Table(data, colWidths=[0.7 * inch, 1 * inch, 2.4 * inch, 0.6 * inch, 1 * inch, 1 * inch])
+                subtotal += total_price
+
+                data.append([
+                    page,
+                    product_number,
+                    Paragraph(description, ParagraphStyle(name='Normal', fontName='Helvetica', fontSize=9)),
+                    str(qty),
+                    f"${unit_price:.2f}",
+                    f"${total_price:.2f}"
+                ])
+            except Exception as e:
+                print(f"Error in row {row}: {e}")
+
+        table = Table(data, colWidths=[0.7*inch, 1*inch, 2.4*inch, 0.6*inch, 1*inch, 1*inch])
         table.setStyle(TableStyle([
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-            ('ALIGN', (3, 1), (-1, -1), 'RIGHT'),
-            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONT', (0, 1), (-1, -1), 'Helvetica'),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+            ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+            ('ALIGN', (0,0), (-1,0), 'CENTER'),
+            ('ALIGN', (3,1), (-1,-1), 'RIGHT'),
+            ('FONT', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('FONT', (0,1), (-1,-1), 'Helvetica'),
         ]))
         table.wrapOn(c, width, height)
         table.drawOn(c, 60, 520)
 
-        # --- Totals Section ---
-        subtotal = 0.0
-        tax_total = 0.0
-
-        for row in range(self.order_table.rowCount()):
-            try:
-                qty_item = self.order_table.item(row, 5)
-                unit_price_item = self.order_table.item(row, 6)
-                discount_item = self.order_table.item(row, 9)
-
-                qty = float(qty_item.text()) if qty_item and qty_item.text().strip() else 0
-                unit_price = float(unit_price_item.text().replace("$", "")) if unit_price_item and unit_price_item.text().strip() else 0
-                discount = float(discount_item.text()) if discount_item and discount_item.text().strip() else 0
-
-                base_price = unit_price * qty
-                discounted_price = base_price * ((100 - discount) / 100)
-
-                tax_checkbox = self.order_table.cellWidget(row, 8)
-                if tax_checkbox and tax_checkbox.isChecked():
-                    tax_total += discounted_price * 0.09386
-
-                subtotal += discounted_price
-            except Exception as e:
-                print(f"Error computing row {row} total in print_order: {e}")
-                continue
-
-
-        # Processing charge checkbox logic
-        processing_charge = 0.0
-        proc_widget = self.order_table.cellWidget(0, 13)
-        if proc_widget and proc_widget.layout():
-            checkbox = proc_widget.layout().itemAt(0).widget()
-            if checkbox and checkbox.isChecked():
-                processing_charge = 0.50
-
-        subtotal = round(subtotal, 2)
-        tax_total = round(tax_total, 2)
-        grand_total = subtotal + tax_total + processing_charge
+        # Totals Section
+        tax_rate = 9.386 / 100
+        tax_amount = round_up(subtotal * tax_rate) if apply_tax else 0.0
+        processing_charge = 0.50 if apply_processing else 0.0
+        grand_total = round_up(subtotal + tax_amount + processing_charge)
 
         totals_data = [["Sub Total:", f"${subtotal:.2f}"]]
-
-        if processing_charge > 0:
+        if total_discount > 0:
+            totals_data.append(["Line Item Discounts:", f"-${total_discount:.2f}"])
+        if apply_processing:
             totals_data.append(["Processing:", f"${processing_charge:.2f}"])
-
-        if tax_total > 0:
-            totals_data.append(["Tax (9.386%):", f"${tax_total:.2f}"])    
-
+        if apply_tax:
+            totals_data.append(["Tax (9.386%):", f"${tax_amount:.2f}"])
         totals_data.append(["Grand Total:", f"${grand_total:.2f}"])
 
-        totals_table = Table(totals_data, colWidths=[1.5*inch, 1*inch])
+        totals_table = Table(totals_data, colWidths=[1.5 * inch, 1 * inch])
         totals_table.setStyle(TableStyle([
-            ('ALIGN', (0,0), (-1,-1), 'RIGHT'),
-            ('FONT', (0,0), (-1,-2), 'Helvetica'),
-            ('FONT', (0,-1), (-1,-1), 'Helvetica-Bold'),
-            ('TEXTCOLOR', (0,-1), (-1,-1), colors.black),
-            ('LINEABOVE', (0,-1), (-1,-1), 1, colors.black),
-            ('TOPPADDING', (0,0), (-1,-1), 4),
+            ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
+            ('FONT', (0, 0), (-1, -2), 'Helvetica'),
+            ('FONT', (0, -1), (-1, -1), 'Helvetica-Bold'),
+            ('TEXTCOLOR', (0, -1), (-1, -1), colors.black),
+            ('LINEABOVE', (0, -1), (-1, -1), 1, colors.black),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
         ]))
         totals_table.wrapOn(c, width, height)
         totals_table.drawOn(c, width - 220, 400)
@@ -992,7 +971,6 @@ class OrderEntryDialog(QDialog):
         # --- Thank You Message (just under totals) ---
         c.setFont("Helvetica-Oblique", 10)
         c.drawCentredString(width / 2, 385, "Thank you for your order!")
-
         c.save()
 
         # Auto open the PDF
