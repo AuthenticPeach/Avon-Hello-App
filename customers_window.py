@@ -323,8 +323,14 @@ class EditCustomerDialog(QDialog):
         self.order_entry_dialog = OrderEntryDialog(
             self.customer_id, current_year, current_campaign, self
         )
-        self.order_entry_dialog.exec_()
-        self.refresh_order_summary()
+        if self.order_entry_dialog.exec_():  # Wait until dialog is closed
+            self.refresh_order_summary()     # This will also call load_order_history()
+            
+            # Re-fetch and highlight the most recent order
+            self.load_order_history()
+            if self.order_history.count() > 0:
+                self.order_history.setCurrentIndex(0)
+
 
     def refresh_order_summary(self):
         conn = sqlite3.connect(DB_PATH)
@@ -860,6 +866,10 @@ class OrderEntryDialog(QDialog):
             conn.close()
 
             QMessageBox.information(self, "Saved", "Order saved successfully!")
+            # Force refresh of parent window if it's an EditCustomerDialog
+            if isinstance(self.parent(), EditCustomerDialog):
+                self.parent().refresh_order_summary()
+
             self.accept()
 
         except Exception as e:
