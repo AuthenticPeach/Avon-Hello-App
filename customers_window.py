@@ -539,12 +539,14 @@ class OrderEntryDialog(QDialog):
         layout = QVBoxLayout()
 
         # Set up Order Table
-        self.order_table = QTableWidget(0, 11)
+        self.order_table = QTableWidget(0, 12)
         self.order_table.setHorizontalHeaderLabels([
             "Product #", "Page", "Description", "Shade/Fragrance", "Size", "QTY",
-            "Unit Price", "Reg Price", "Tax", "Discount %", "Total Price"
+            "Unit Price", "Reg Price", "Tax", "Discount %", "Total Price", "Proc. Fee"
         ])
         self.order_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        # Set minimum width for "Proc. Fee" to ensure checkbox is visible
+        self.order_table.setColumnWidth(11, 90)
         layout.addWidget(self.order_table)
 
         # Connect the itemChanged signal once.
@@ -588,7 +590,7 @@ class OrderEntryDialog(QDialog):
         self.order_table.setItem(row_position, 6, QTableWidgetItem("$0.00"))  # Unit Price
         self.order_table.setItem(row_position, 7, QTableWidgetItem("$0.00"))  # Reg Price
 
-        # Checkbox for Tax
+        # Tax Checkbox
         tax_checkbox = QCheckBox()
         tax_checkbox.setChecked(False)
         tax_widget = QWidget()
@@ -597,6 +599,20 @@ class OrderEntryDialog(QDialog):
         tax_layout.setAlignment(Qt.AlignCenter)
         tax_layout.setContentsMargins(0, 0, 0, 0)
         self.order_table.setCellWidget(row_position, 8, tax_widget)
+        self.order_table.setItem(row_position, 8, QTableWidgetItem())
+        self.order_table.item(row_position, 8).setFlags(Qt.ItemIsEnabled)
+
+        # Processing Checkbox
+        proc_checkbox = QCheckBox()
+        proc_checkbox.setChecked(False)
+        proc_widget = QWidget()
+        proc_layout = QHBoxLayout(proc_widget)
+        proc_layout.addWidget(proc_checkbox)
+        proc_layout.setAlignment(Qt.AlignCenter)
+        proc_layout.setContentsMargins(0, 0, 0, 0)
+        self.order_table.setCellWidget(row_position, 11, proc_widget)
+        self.order_table.setItem(row_position, 11, QTableWidgetItem())
+        self.order_table.item(row_position, 11).setFlags(Qt.ItemIsEnabled)
 
         # Discount %
         self.order_table.setItem(row_position, 9, QTableWidgetItem("0"))
@@ -707,6 +723,20 @@ class OrderEntryDialog(QDialog):
 
             self.order_table.setCellWidget(row_position, 8, tax_widget)
 
+            # --- Add after setting up Tax checkbox ---
+            proc_checkbox = QCheckBox()
+            # Optionally, you can load this from database if you add a new column
+            proc_checkbox.setChecked(False)  # Default: False
+
+            proc_widget = QWidget()
+            proc_layout = QHBoxLayout(proc_widget)
+            proc_layout.addWidget(proc_checkbox)
+            proc_layout.setAlignment(Qt.AlignCenter)
+            proc_layout.setContentsMargins(0, 0, 0, 0)
+
+            self.order_table.setCellWidget(row_position, 11, proc_widget)
+
+
             self.order_table.setItem(row_position, 9, QTableWidgetItem(str(product[9])))
             self.order_table.setItem(row_position, 10, QTableWidgetItem(f"${product[10]:.2f}"))
         self.update_total(None)
@@ -734,37 +764,7 @@ class OrderEntryDialog(QDialog):
                 )
             """)
 
-            # Calculate order_total by summing each product’s total
-            order_total = 0.0
-            for row in range(self.order_table.rowCount()):
-                total_price_item = self.order_table.item(row, 10)
-                if total_price_item and total_price_item.text().strip():
-                    try:
-                        row_total = float(total_price_item.text().replace("$", ""))
-                        order_total += row_total
-                    except ValueError:
-                        print(f"Invalid total at row {row}: {total_price_item.text()}")
-                        continue
-
-            print(f"Calculated order total: {order_total}")
-
-            # Insert new order using the current campaign settings from the dialog
-            cursor.execute("""
-                INSERT INTO orders (customer_id, campaign_year, campaign_number, order_total, previous_balance, payment, net_due)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (
-                self.customer_id,
-                self.campaign_year,
-                self.campaign_number,
-                order_total,
-                0,           # previous_balance; update if needed
-                0,           # payment; update if needed
-                order_total  # net_due; for now assume net_due equals order_total
-            ))
-            order_id = cursor.lastrowid  # Get the inserted order ID
-            print(f"Order inserted with order_id: {order_id}")
-
-            # Ensure order_products table exists
+            # Ensure order_products table has 'processing' column
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS order_products (
                     product_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -779,11 +779,42 @@ class OrderEntryDialog(QDialog):
                     reg_price REAL,
                     tax INTEGER,
                     discount REAL,
-                    total_price REAL
+                    total_price REAL,
+                    processing INTEGER DEFAULT 0
                 )
             """)
 
-            # Insert each product into order_products table
+            # Calculate order_total
+            order_total = 0.0
+            for row in range(self.order_table.rowCount()):
+                total_price_item = self.order_table.item(row, 10)
+                if total_price_item and total_price_item.text().strip():
+                    try:
+                        row_total = float(total_price_item.text().replace("$", ""))
+                        order_total += row_total
+                    except ValueError:
+                        print(f"Invalid total at row {row}: {total_price_item.text()}")
+                        continue
+
+            print(f"Calculated order total: {order_total}")
+
+            # Insert new order
+            cursor.execute("""
+                INSERT INTO orders (customer_id, campaign_year, campaign_number, order_total, previous_balance, payment, net_due)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                self.customer_id,
+                self.campaign_year,
+                self.campaign_number,
+                order_total,
+                0,
+                0,
+                order_total
+            ))
+            order_id = cursor.lastrowid
+            print(f"Order inserted with order_id: {order_id}")
+
+            # Save products
             for row in range(self.order_table.rowCount()):
                 try:
                     product_number = self.order_table.item(row, 0).text()
@@ -794,30 +825,47 @@ class OrderEntryDialog(QDialog):
                     qty = int(self.order_table.item(row, 5).text())
                     unit_price = float(self.order_table.item(row, 6).text().replace("$", "").strip())
                     reg_price = float(self.order_table.item(row, 7).text().replace("$", "").strip())
-                    tax_checkbox = self.order_table.cellWidget(row, 8)
+
+                    # --- Tax checkbox ---
+                    tax_widget = self.order_table.cellWidget(row, 8)
+                    tax_checkbox = tax_widget.layout().itemAt(0).widget() if tax_widget and tax_widget.layout().count() > 0 else None
                     tax = 1 if tax_checkbox and tax_checkbox.isChecked() else 0
+
+                    # --- Discount ---
                     discount = float(self.order_table.item(row, 9).text())
+
+                    # --- Total Price ---
                     total_price = float(self.order_table.item(row, 10).text().replace("$", "").strip())
-                    
+
+                    # --- Processing checkbox ---
+                    proc_widget = self.order_table.cellWidget(row, 11)
+                    proc_checkbox = proc_widget.layout().itemAt(0).widget() if proc_widget and proc_widget.layout().count() > 0 else None
+                    processing = 1 if proc_checkbox and proc_checkbox.isChecked() else 0
+
                     cursor.execute("""
                         INSERT INTO order_products 
-                        (order_id, product_number, page, description, shade, size, qty, unit_price, reg_price, tax, discount, total_price)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (order_id, product_number, page, description, shade, size, qty, unit_price, reg_price, tax, discount, total_price))
+                        (order_id, product_number, page, description, shade, size, qty, unit_price, reg_price, tax, discount, total_price, processing)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        order_id, product_number, page, description, shade, size, qty,
+                        unit_price, reg_price, tax, discount, total_price, processing
+                    ))
                     print(f"Inserted product for row {row}")
+
                 except Exception as e:
                     print(f"Error inserting product for row {row}: {e}")
-                    continue  # Skip rows with invalid data
+                    continue
 
             conn.commit()
             conn.close()
 
             QMessageBox.information(self, "Saved", "Order saved successfully!")
-            self.accept()  # Close the order entry dialog
+            self.accept()
 
         except Exception as e:
             print("Error in save_order:", e)
             QMessageBox.critical(self, "Error", f"An error occurred while saving the order: {e}")
+
 
     def print_order(self):
         from reportlab.lib.pagesizes import letter
@@ -896,7 +944,7 @@ class OrderEntryDialog(QDialog):
         data = [["Page", "Product #", "Product", "Qty", "Unit Price", "Total"]]
         subtotal = 0.0
         total_discount = 0.0
-        apply_processing = False
+        processing_count = 0
         apply_tax = False
 
         for row in range(self.order_table.rowCount()):
@@ -910,7 +958,7 @@ class OrderEntryDialog(QDialog):
                 discount_percent = float(self.order_table.item(row, 9).text() or 0)
 
                 tax_widget = self.order_table.cellWidget(row, 8)
-                proc_widget = self.order_table.cellWidget(row, 7)
+                proc_widget = self.order_table.cellWidget(row, 11)
 
                 tax_checkbox = tax_widget.layout().itemAt(0).widget() if tax_widget and tax_widget.layout().count() > 0 else None
                 proc_checkbox = proc_widget.layout().itemAt(0).widget() if proc_widget and proc_widget.layout().count() > 0 else None
@@ -919,7 +967,8 @@ class OrderEntryDialog(QDialog):
                 proc_checked = proc_checkbox.isChecked() if proc_checkbox else False
 
                 if proc_checked:
-                    apply_processing = True
+                    processing_count += 1
+
                 if tax_checked:
                     apply_tax = True
 
@@ -960,17 +1009,18 @@ class OrderEntryDialog(QDialog):
         # Totals Section
         tax_rate = 9.386 / 100
         tax_amount = round_up(subtotal * tax_rate) if apply_tax else 0.0
-        processing_charge = 0.50 if apply_processing else 0.0
+        processing_charge = round_up(0.50 * processing_count)
         grand_total = round_up(subtotal + tax_amount + processing_charge)
 
         totals_data = [["Sub Total:", f"${subtotal:.2f}"]]
         if total_discount > 0:
             totals_data.append(["Line Item Discounts:", f"-${total_discount:.2f}"])
-        if apply_processing:
+        if processing_count > 0:
             totals_data.append(["Processing:", f"${processing_charge:.2f}"])
         if apply_tax:
             totals_data.append(["Tax (9.386%):", f"${tax_amount:.2f}"])
         totals_data.append(["Grand Total:", f"${grand_total:.2f}"])
+
 
         totals_table = Table(totals_data, colWidths=[1.5 * inch, 1 * inch])
         totals_table.setStyle(TableStyle([
