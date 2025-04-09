@@ -307,9 +307,20 @@ class EditCustomerDialog(QDialog):
         btn_refresh_summary.clicked.connect(self.refresh_order_summary)
         layout.addWidget(btn_refresh_summary)
 
+        btn_order_actions = QHBoxLayout()
+
         self.btn_view_order = QPushButton("View Order Details")
         self.btn_view_order.clicked.connect(self.view_order_details)
-        layout.addWidget(self.btn_view_order)
+
+        self.btn_delete_order = QPushButton()
+        self.btn_delete_order.setIcon(QIcon("delete_icon.png"))
+        self.btn_delete_order.setToolTip("Delete selected order")
+        self.btn_delete_order.clicked.connect(self.delete_selected_order)
+
+        btn_order_actions.addWidget(self.btn_view_order)
+        btn_order_actions.addWidget(self.btn_delete_order)
+        layout.addLayout(btn_order_actions)
+
 
         btn_save = QPushButton("Save Changes")
         btn_save.clicked.connect(self.save_customer)
@@ -330,7 +341,6 @@ class EditCustomerDialog(QDialog):
             self.load_order_history()
             if self.order_history.count() > 0:
                 self.order_history.setCurrentIndex(0)
-
 
     def refresh_order_summary(self):
         conn = sqlite3.connect(DB_PATH)
@@ -442,6 +452,40 @@ class EditCustomerDialog(QDialog):
         conn.close()
         QMessageBox.information(self, "Success", "Customer updated successfully!")
         self.accept()
+
+    def delete_selected_order(self):
+        index = self.order_history.currentIndex()
+        if index < 0:
+            QMessageBox.warning(self, "No Selection", "Please select an order to delete.")
+            return
+
+        order_id = self.order_history.itemData(index)
+        if not order_id:
+            QMessageBox.warning(self, "Error", "Invalid order selected.")
+            return
+
+        confirm = QMessageBox.question(
+            self, "Confirm Delete",
+            "Are you sure you want to delete this order?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if confirm == QMessageBox.Yes:
+            try:
+                conn = sqlite3.connect(DB_PATH)
+                cursor = conn.cursor()
+
+                # First delete all products related to this order
+                cursor.execute("DELETE FROM order_products WHERE order_id = ?", (order_id,))
+                # Then delete the order itself
+                cursor.execute("DELETE FROM orders WHERE order_id = ?", (order_id,))
+                conn.commit()
+                conn.close()
+
+                QMessageBox.information(self, "Deleted", "Order deleted successfully.")
+                self.refresh_order_summary()
+
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to delete order: {e}")
 
 class AddCustomerDialog(QDialog):
     """Dialog to Add a New Customer."""
