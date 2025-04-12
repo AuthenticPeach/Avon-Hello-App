@@ -30,7 +30,7 @@ class MainMenu(QMainWindow):
         super().__init__()
         self.setWindowTitle("Avon Hello - Main Menu")
         self.setGeometry(200, 200, 600, 400)
-        self.setWindowIcon(QIcon("Avon256.png"))  # Icon
+        self.setWindowIcon(QIcon("Avon256.ico"))  # Icon
 
         # Set global font
         self.setFont(QFont("Segoe UI", 10))
@@ -172,10 +172,18 @@ class MainMenu(QMainWindow):
         self.options_window.show()
 
 if __name__ == "__main__":
+    import ctypes
+    import os
+    from PyQt5.QtGui import QIcon
+    app_id = "com.avon.hello"
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
+    
     app = QApplication(sys.argv)
         # Set the icon for the entire application (shows in taskbar)
-    icon_path = os.path.join(os.path.dirname(__file__), "Avon256.png")
-    app.setWindowIcon(QIcon(icon_path))
+    icon_path = os.path.join(os.path.dirname(sys.argv[0]), "Avon256.ico")
+    icon = QIcon(icon_path)
+    app.setWindowIcon(icon)
+
     window = MainMenu()
     window.show()
     sys.exit(app.exec_())
