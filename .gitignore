@@ -30,3 +30,5 @@ Thumbs.db
 *.iss
 *.msi
 *.bak
+# Fix file
+fix_database.py

@@ -27,6 +27,56 @@ def log_uncaught_exceptions(ex_cls, ex, tb):
 
 sys.excepthook = log_uncaught_exceptions
 
+
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
+
+
+def initialize_db_if_missing():
+    if not os.path.exists(DB_PATH):
+        print("🔧 Database not found. Creating avon_hello.db...")
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+        # Add required tables
+        cursor.execute("""CREATE TABLE IF NOT EXISTS customers (
+            customer_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            first_name TEXT,
+            last_name TEXT,
+            address TEXT,
+            city TEXT,
+            state TEXT,
+            zip_code TEXT,
+            office_phone TEXT,
+            cell_phone TEXT,
+            email TEXT,
+            status TEXT
+        )""")
+
+        cursor.execute("""CREATE TABLE IF NOT EXISTS representative_info (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            rep_name TEXT,
+            rep_address TEXT,
+            rep_office_phone TEXT,
+            rep_cell_phone TEXT,
+            rep_email TEXT,
+            rep_website TEXT
+        )""")
+
+        cursor.execute("""CREATE TABLE IF NOT EXISTS campaign_settings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            year INTEGER DEFAULT 2025,
+            campaign INTEGER DEFAULT 1,
+            last_campaign INTEGER DEFAULT 30
+        )""")
+
+        conn.commit()
+        conn.close()
+        print("✅ Database created.")
+
 def is_dark_mode_enabled():
     config = configparser.ConfigParser()
     if os.path.exists(SETTINGS_FILE):
@@ -41,7 +91,8 @@ class MainMenu(QMainWindow):
         super().__init__()
         self.setWindowTitle("Avon Hello - Main Menu")
         self.setGeometry(200, 200, 600, 400)
-        self.setWindowIcon(QIcon("Avon256.ico"))  # Icon
+        icon_path = resource_path("Avon256.ico")
+        self.setWindowIcon(QIcon(icon_path))
 
         # Set global font
         self.setFont(QFont("Segoe UI", 10))
@@ -188,9 +239,9 @@ if __name__ == "__main__":
     from PyQt5.QtGui import QIcon
     app_id = "com.avon.hello"
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
-    
+    app = initialize_db_if_missing()
     app = QApplication(sys.argv)
-        # Set the icon for the entire application (shows in taskbar)
+
     icon_path = os.path.join(os.path.dirname(sys.argv[0]), "Avon256.ico")
     icon = QIcon(icon_path)
     app.setWindowIcon(icon)

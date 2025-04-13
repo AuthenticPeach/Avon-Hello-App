@@ -1,6 +1,9 @@
+import os
 import sqlite3
 
-DB_PATH = "avon_hello.db"
+APP_DIR = os.path.join(os.getenv('APPDATA'), 'AvonHello')
+os.makedirs(APP_DIR, exist_ok=True)
+DB_PATH = os.path.join(APP_DIR, 'avon_hello.db')
 
 def initialize_database():
     conn = sqlite3.connect(DB_PATH)
