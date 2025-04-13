@@ -8,8 +8,9 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon
 
-DB_PATH = "avon_hello.db"
-SETTINGS_FILE = "settings.conf"
+from db_utils import DB_PATH, SETTINGS_FILE
+
+
 
 def load_settings():
     config = configparser.ConfigParser()

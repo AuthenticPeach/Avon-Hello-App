@@ -1,5 +1,6 @@
 import sqlite3
 import os
+import sys
 import pathlib
 import configparser
 
@@ -12,8 +13,8 @@ from PyQt5.QtWidgets import (
     QCheckBox, QTableWidget, QHeaderView, QTableWidgetItem, QCheckBox
 )
 
-from db_utils import get_representative_info
-from db_utils import get_current_campaign_settings
+from db_utils import DB_PATH, SETTINGS_FILE, get_representative_info, get_current_campaign_settings
+
 from datetime import datetime
 
 from reportlab.lib.pagesizes import letter
@@ -24,33 +25,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.styles import ParagraphStyle
 
-DB_PATH = "avon_hello.db"
-SETTINGS_FILE = "settings.conf"
-
-def initialize_database():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    # Create the customers table if it doesn't exist
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS customers (
-            customer_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            first_name TEXT,
-            last_name TEXT,
-            address TEXT,
-            city TEXT,
-            state TEXT,
-            zip_code TEXT,
-            phone_office TEXT,
-            phone_cell TEXT,
-            email TEXT,
-            status TEXT
-        )
-    """)
-
-    # You can also add other required tables here (orders, representative_info, etc.)
-    conn.commit()
-    conn.close()
+from db_utils import DB_PATH, SETTINGS_FILE
 
 def is_dark_mode_enabled():
     config = configparser.ConfigParser()
@@ -58,6 +33,12 @@ def is_dark_mode_enabled():
         config.read(SETTINGS_FILE)
         return config.getboolean("Appearance", "dark_mode", fallback=False)
     return False
+
+def resource_path(relative_path):
+    """Get the absolute path to a resource, works for dev and PyInstaller."""
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
 
 class CustomersWindow(QMainWindow):
     """Customers Search with Editable Customer Window."""
@@ -161,20 +142,24 @@ class CustomersWindow(QMainWindow):
         btn_layout = QHBoxLayout()
         self.btn_all_customers = QPushButton("All Customers")
         self.btn_add_customer = QPushButton("Add Customer")
+        self.btn_delete_customer = QPushButton("Delete Customer")
         self.btn_exit = QPushButton("Exit")
 
         self.btn_all_customers.setStyleSheet("background-color: #3498db; color: white; font-size: 14px; padding: 6px;")
         self.btn_add_customer.setStyleSheet("background-color: #2ecc71; color: white; font-size: 14px; padding: 6px;")
         self.btn_exit.setStyleSheet("background-color: #e74c3c; color: white; font-size: 14px; padding: 6px;")
+        self.btn_delete_customer.setStyleSheet("background-color: #e67e22; color: white; font-size: 14px; padding: 6px;")
 
         btn_layout.addWidget(self.btn_all_customers)
         btn_layout.addWidget(self.btn_add_customer)
+        btn_layout.addWidget(self.btn_delete_customer)
         btn_layout.addWidget(self.btn_exit)
 
         layout.addLayout(btn_layout)
 
         self.btn_all_customers.clicked.connect(self.load_customers)
         self.btn_add_customer.clicked.connect(self.add_customer_dialog)
+        self.btn_delete_customer.clicked.connect(self.delete_selected_customer)
         self.btn_exit.clicked.connect(self.close)
 
         central_widget = QWidget()
@@ -188,6 +173,48 @@ class CustomersWindow(QMainWindow):
         dialog = AddCustomerDialog(self)
         if dialog.exec_():  # If dialog was accepted (customer added)
             self.load_customers()  # Refresh the list
+
+    def delete_selected_customer(self):
+        selected_item = self.customer_tree.currentItem()
+        if not selected_item:
+            QMessageBox.warning(self, "No Selection", "Please select a customer to delete.")
+            return
+
+        customer_id = selected_item.data(0, Qt.UserRole)
+        if not customer_id:
+            QMessageBox.warning(self, "Invalid", "Please select a valid customer item.")
+            return
+
+        confirm = QMessageBox.question(
+            self,
+            "Confirm Delete",
+            "Are you sure you want to delete this customer and all related orders?",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+
+        if confirm == QMessageBox.Yes:
+            try:
+                conn = sqlite3.connect(DB_PATH)
+                cursor = conn.cursor()
+
+                # Delete order_products tied to this customer's orders
+                cursor.execute("SELECT order_id FROM orders WHERE customer_id = ?", (customer_id,))
+                order_ids = cursor.fetchall()
+                for (order_id,) in order_ids:
+                    cursor.execute("DELETE FROM order_products WHERE order_id = ?", (order_id,))
+
+                # Delete orders
+                cursor.execute("DELETE FROM orders WHERE customer_id = ?", (customer_id,))
+                # Delete customer
+                cursor.execute("DELETE FROM customers WHERE customer_id = ?", (customer_id,))
+                conn.commit()
+                conn.close()
+
+                QMessageBox.information(self, "Deleted", "Customer and all related orders deleted successfully.")
+                self.load_customers()
+
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to delete customer: {e}")
 
     def load_customers(self):
         """Load all customers and display in a tree view."""
@@ -339,7 +366,7 @@ class EditCustomerDialog(QDialog):
         self.btn_view_order.clicked.connect(self.view_order_details)
 
         self.btn_delete_order = QPushButton()
-        self.btn_delete_order.setIcon(QIcon("delete_icon.png"))
+        self.btn_delete_order.setIcon(QIcon(resource_path("delete_icon.png")))
         self.btn_delete_order.setToolTip("Delete selected order")
         self.btn_delete_order.clicked.connect(self.delete_selected_order)
 
@@ -560,7 +587,6 @@ class AddCustomerDialog(QDialog):
         self.setLayout(layout)
 
     def save_customer(self):
-
         """Insert new customer into the database."""
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
@@ -587,13 +613,11 @@ class AddCustomerDialog(QDialog):
         QMessageBox.information(self, "Success", "Customer added successfully!")
         self.accept()
 
-
 class OrderEntryDialog(QDialog):
     """Dialog to Enter Order Details for a Customer."""
     
     def __init__(self, customer_id, campaign_year, campaign_number, parent=None, order_id=None):
         super().__init__(parent)
-        initialize_database()
         self.setWindowTitle("Order Entry")
         self.setGeometry(300, 200, 1000, 500)
         self.customer_id = customer_id
@@ -948,7 +972,6 @@ class OrderEntryDialog(QDialog):
         except Exception as e:
             print("Error in save_order:", e)
             QMessageBox.critical(self, "Error", f"An error occurred while saving the order: {e}")
-
 
     def print_order(self):
         from reportlab.lib.pagesizes import letter
