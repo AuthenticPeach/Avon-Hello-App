@@ -1,0 +1,31 @@
+# Ignore Python virtual environments
+venv/
+env/
+.venv/
+
+# PyInstaller build folders
+build/
+
+__pycache__/
+*.spec
+
+# OS system files
+.DS_Store
+Thumbs.db
+
+# Logs
+
+# IDE/editor folders
+.vscode/
+.idea/
+
+
+# Compiled Python files
+*.pyc
+*.pyo
+*.pyd
+
+# Installer executables
+*.exe
+*.msi
+*.bak
