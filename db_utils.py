@@ -2,6 +2,30 @@ import sqlite3
 
 DB_PATH = "avon_hello.db"
 
+def initialize_database():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS customers (
+            customer_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            first_name TEXT,
+            last_name TEXT,
+            address TEXT,
+            city TEXT,
+            state TEXT,
+            zip_code TEXT,
+            office_phone TEXT,
+            cell_phone TEXT,
+            email TEXT,
+            status TEXT
+        )
+    """)
+
+    # (Repeat this for orders, order_products, etc.)
+    conn.commit()
+    conn.close()
+
 def get_current_campaign_settings():
     """Retrieve the current campaign year and campaign number from the database."""
     conn = sqlite3.connect(DB_PATH)

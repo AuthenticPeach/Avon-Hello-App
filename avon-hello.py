@@ -11,10 +11,21 @@ from PyQt5.QtGui import QFont
 from PyQt5.QtGui import QIcon
 from customers_window import CustomersWindow  # Importing the Customers Window
 from options_window import OptionsWindow  # Importing the Options Window
+import traceback
+
+from db_utils import initialize_database
+initialize_database()
+
 
 DB_PATH = "avon_hello.db"  # Default database location
 SETTINGS_FILE = "settings.conf"
 
+
+def log_uncaught_exceptions(ex_cls, ex, tb):
+    with open("error_log.txt", "w") as f:
+        traceback.print_exception(ex_cls, ex, tb, file=f)
+
+sys.excepthook = log_uncaught_exceptions
 
 def is_dark_mode_enabled():
     config = configparser.ConfigParser()

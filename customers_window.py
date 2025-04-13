@@ -1,8 +1,9 @@
-from PyQt5.QtCore import Qt
 import sqlite3
 import os
+import pathlib
 import configparser
 
+from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import (
     QMainWindow, QVBoxLayout, QPushButton, QTreeWidget, 
@@ -25,6 +26,31 @@ from reportlab.lib.styles import ParagraphStyle
 
 DB_PATH = "avon_hello.db"
 SETTINGS_FILE = "settings.conf"
+
+def initialize_database():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    # Create the customers table if it doesn't exist
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS customers (
+            customer_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            first_name TEXT,
+            last_name TEXT,
+            address TEXT,
+            city TEXT,
+            state TEXT,
+            zip_code TEXT,
+            phone_office TEXT,
+            phone_cell TEXT,
+            email TEXT,
+            status TEXT
+        )
+    """)
+
+    # You can also add other required tables here (orders, representative_info, etc.)
+    conn.commit()
+    conn.close()
 
 def is_dark_mode_enabled():
     config = configparser.ConfigParser()
@@ -567,6 +593,7 @@ class OrderEntryDialog(QDialog):
     
     def __init__(self, customer_id, campaign_year, campaign_number, parent=None, order_id=None):
         super().__init__(parent)
+        initialize_database()
         self.setWindowTitle("Order Entry")
         self.setGeometry(300, 200, 1000, 500)
         self.customer_id = customer_id
@@ -871,6 +898,8 @@ class OrderEntryDialog(QDialog):
                     page = self.order_table.item(row, 1).text()
                     description = self.order_table.item(row, 2).text()
                     shade = self.order_table.item(row, 3).text()
+                    if shade.strip():
+                        description += f" — {shade.strip()}"
                     size = self.order_table.item(row, 4).text()
                     qty = int(self.order_table.item(row, 5).text())
                     unit_price = float(self.order_table.item(row, 6).text().replace("$", "").strip())
@@ -950,7 +979,9 @@ class OrderEntryDialog(QDialog):
         customer_cell = self.parent().cell_phone_input.text()
         customer_office = self.parent().office_phone_input.text()
 
-        filename = f"invoice-{customer_name.replace(' ', '_').lower()}-{today_str}.pdf"
+        downloads_folder = str(pathlib.Path.home() / "Downloads")
+        filename = os.path.join(downloads_folder, f"invoice-{customer_name.replace(' ', '_').lower()}-{today_str}.pdf")
+
         c = canvas.Canvas(filename, pagesize=letter)
         width, height = letter
 
@@ -1006,6 +1037,9 @@ class OrderEntryDialog(QDialog):
                 page = self.order_table.item(row, 1).text()
                 product_number = self.order_table.item(row, 0).text()
                 description = self.order_table.item(row, 2).text()
+                shade = self.order_table.item(row, 3).text()
+                if shade.strip():
+                    description += f" — {shade.strip()}"
                 qty = int(self.order_table.item(row, 5).text())
                 unit_price = float(self.order_table.item(row, 6).text().replace("$", "").strip())
                 reg_price = float(self.order_table.item(row, 7).text().replace("$", "").strip())
@@ -1092,6 +1126,7 @@ class OrderEntryDialog(QDialog):
         c.setFont("Helvetica-Oblique", 10)
         c.drawCentredString(width / 2, 385, "Thank you for your order!")
         c.save()
+        QMessageBox.information(self, "Saved", f"Invoice exported to:\n{filename}")
 
         # Auto open the PDF
         import subprocess
