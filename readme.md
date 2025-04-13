@@ -75,15 +75,6 @@ To start fresh:
 
 ---
 
-## 🙋‍♀️ Need Help?
-
-Reach out to your app provider for:
-- Technical support
-- Custom feature requests
-- Data backup or migration
-
----
-
 ## 💼 Credits
 
 App designed by **AuthenticPeach**  

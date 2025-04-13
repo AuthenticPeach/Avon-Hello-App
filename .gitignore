@@ -2,6 +2,7 @@
 venv/
 env/
 .venv/
+__pycache__/
 
 # PyInstaller build folders
 build/
@@ -26,6 +27,6 @@ Thumbs.db
 *.pyd
 
 # Installer executables
-*.exe
+*.iss
 *.msi
 *.bak
